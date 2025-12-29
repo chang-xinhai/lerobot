@@ -13,7 +13,14 @@ MAX_STEPS_PER_EPISODE = 20
 
 
 def main():
-    device = torch.device("mps")  # or "cuda" or "cpu"
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    print(f"Using device: {device}")
     model_id = "<user>/robot_learning_tutorial_act"
     model = ACTPolicy.from_pretrained(model_id)
 
