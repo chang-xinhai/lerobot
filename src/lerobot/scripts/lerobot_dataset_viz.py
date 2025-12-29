@@ -74,7 +74,7 @@ import torch.utils.data
 import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.utils.constants import ACTION, DONE, OBS_STATE, REWARD
+from lerobot.utils.constants import ACTION, DONE, OBS_STATE, OBS_EEF, OBS_POINTCLOUD, REWARD
 
 
 def to_hwc_uint8_numpy(chw_float32_torch: torch.Tensor) -> np.ndarray:
@@ -127,6 +127,16 @@ def visualize_dataset(
     if mode == "distant":
         rr.serve_web_viewer(open_browser=False, web_port=web_port)
 
+    # Print dataset information
+    logging.info("Dataset Information:")
+    sample = dataset[0]
+    logging.info("Available keys and their shapes:")
+    for key in sorted(sample.keys()):
+        if hasattr(sample[key], 'shape'):
+            logging.info(f"  {key}: shape={sample[key].shape}, dtype={sample[key].dtype}")
+        else:
+            logging.info(f"  {key}: {type(sample[key]).__name__}")
+
     logging.info("Logging to Rerun")
 
     for batch in tqdm.tqdm(dataloader, total=len(dataloader)):
@@ -139,6 +149,42 @@ def visualize_dataset(
             for key in dataset.meta.camera_keys:
                 # TODO(rcadene): add `.compress()`? is it lossless?
                 rr.log(key, rr.Image(to_hwc_uint8_numpy(batch[key][i])))
+
+            # display depth maps
+            depth_keys = [k for k in batch.keys() if k.startswith("observation.depth.")]
+            for key in depth_keys:
+                depth_data = batch[key][i]
+                # Convert from (1, H, W) to (H, W) for proper visualization
+                if depth_data.ndim == 3 and depth_data.shape[0] == 1:
+                    depth_data = depth_data.squeeze(0)
+                rr.log(key, rr.DepthImage(depth_data.numpy(), meter=1.0))
+
+            # display end-effector pose if available
+            if OBS_EEF in batch:
+                eef_data = batch[OBS_EEF][i]
+                # Assuming format is [x, y, z, qx, qy, qz, qw] (position + quaternion)
+                if len(eef_data) >= 7:
+                    position = eef_data[:3].numpy()
+                    quaternion = eef_data[3:7].numpy()  # [qx, qy, qz, qw]
+                    # Rerun expects quaternion in [x, y, z, w] format
+                    rr.log(
+                        OBS_EEF,
+                        rr.Transform3D(translation=position, rotation=rr.Quaternion(xyzw=quaternion))
+                    )
+                # Also log as scalars for detailed inspection
+                for dim_idx, val in enumerate(eef_data):
+                    rr.log(f"{OBS_EEF}/{dim_idx}", rr.Scalars(val.item()))
+
+            # display pointcloud if available (format: N x 6, where columns are x,y,z,r,g,b)
+            if OBS_POINTCLOUD in batch:
+                pc_data = batch[OBS_POINTCLOUD][i]  # shape: (N, 6)
+                if pc_data.ndim == 2 and pc_data.shape[1] == 6:
+                    positions = pc_data[:, :3].numpy()  # x, y, z
+                    colors = pc_data[:, 3:6].numpy()  # r, g, b (assumed to be in 0-1 range)
+                    # Convert colors to uint8 if they're in 0-1 range
+                    if colors.max() <= 1.0:
+                        colors = (colors * 255).astype(np.uint8)
+                    rr.log(OBS_POINTCLOUD, rr.Points3D(positions, colors=colors))
 
             # display each dimension of action space (e.g. actuators command)
             if ACTION in batch:
@@ -261,14 +307,25 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--video-backend",
+        type=str,
+        default=None,
+        help=(
+            "Video backend to use for decoding videos. Options: 'torchcodec', 'pyav', 'video_reader'. "
+            "Defaults to 'torchcodec' if available, otherwise 'pyav'. Use 'pyav' if torchcodec has issues."
+        ),
+    )
+
     args = parser.parse_args()
     kwargs = vars(args)
     repo_id = kwargs.pop("repo_id")
     root = kwargs.pop("root")
     tolerance_s = kwargs.pop("tolerance_s")
+    video_backend = kwargs.pop("video_backend")
 
     logging.info("Loading dataset")
-    dataset = LeRobotDataset(repo_id, episodes=[args.episode_index], root=root, tolerance_s=tolerance_s)
+    dataset = LeRobotDataset(repo_id, episodes=[args.episode_index], root=root, tolerance_s=tolerance_s, video_backend=video_backend)
 
     visualize_dataset(dataset, **vars(args))
 
