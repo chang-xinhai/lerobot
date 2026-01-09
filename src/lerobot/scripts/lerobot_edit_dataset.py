@@ -741,7 +741,7 @@ def decode_episode_videos_to_images(
     new_meta: LeRobotDatasetMetadata,
     episode_index: int,
     num_workers: int = 4,
-) -> dict[str, dict]:
+) -> None:
     """Decode videos from a single episode and save as images.
 
     Args:
@@ -749,9 +749,6 @@ def decode_episode_videos_to_images(
         new_meta: Metadata object for the new image dataset
         episode_index: Episode index to process
         num_workers: Number of threads for parallel image saving
-
-    Returns:
-        Dictionary mapping frame indices to image paths
     """
     from PIL import Image
 
@@ -790,7 +787,7 @@ def decode_episode_videos_to_images(
             # Determine image path using LeRobot's structure
             img_path = new_meta.root / "images" / video_key / f"episode-{episode_index:06d}" / f"frame-{frame_idx:06d}.png"
             img_path.parent.mkdir(parents=True, exist_ok=True)
-            img.save(img_path, quality=100)
+            img.save(img_path)
             return str(img_path)
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -1012,8 +1009,6 @@ def _copy_data_with_images(
 
 def handle_convert_to_image(cfg: EditDatasetConfig) -> None:
     """Handle the convert_to_image operation."""
-    import torch  # noqa: F401
-
     dataset = LeRobotDataset(cfg.repo_id, root=cfg.root)
 
     # Determine output directory and repo_id

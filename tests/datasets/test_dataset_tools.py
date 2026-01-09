@@ -1333,7 +1333,9 @@ def test_convert_dp3_style_video_to_image(sample_dataset, tmp_path):
     import shutil
 
     # Read the res_for_dp3/data_info.json to understand the expected structure
-    res_for_dp3_path = Path("/home/runner/work/lerobot/lerobot/res_for_dp3/data_info.json")
+    # Use __file__ to get relative path from the test file
+    tests_dir = Path(__file__).parent.parent.parent  # Go up to repo root
+    res_for_dp3_path = tests_dir / "res_for_dp3" / "data_info.json"
     with open(res_for_dp3_path) as f:
         dp3_info = json.load(f)
 
