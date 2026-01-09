@@ -24,6 +24,7 @@ class FeatureType(str, Enum):
     ACTION = "ACTION"
     REWARD = "REWARD"
     LANGUAGE = "LANGUAGE"
+    POINTCLOUD = "POINTCLOUD"
 
 
 class PipelineFeatureType(str, Enum):
