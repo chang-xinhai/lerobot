@@ -657,6 +657,9 @@ def _copy_data_without_images(
 
     for src_path in tqdm(parquet_files, desc="Processing data files"):
         df = pd.read_parquet(src_path).reset_index(drop=True)
+        
+        # Convert PyArrow extension dtypes to avoid dtype comparison issues
+        df = pd.DataFrame(df.to_dict(orient="list"))
 
         # Filter to only include selected episodes
         df = df[df["episode_index"].isin(episode_set)].copy()
@@ -962,6 +965,9 @@ def _copy_data_with_images(
 
     for src_path in tqdm(parquet_files, desc="Processing data files"):
         df = pd.read_parquet(src_path).reset_index(drop=True)
+        
+        # Convert PyArrow extension dtypes to avoid dtype comparison issues
+        df = pd.DataFrame(df.to_dict(orient="list"))
 
         # Filter to only include selected episodes
         df = df[df["episode_index"].isin(episode_set)].copy()
