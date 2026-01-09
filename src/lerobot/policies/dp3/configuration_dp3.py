@@ -75,9 +75,9 @@ class DP3Config(PreTrainedConfig):
     """
 
     # Inputs / output structure.
-    n_obs_steps: int = 2
-    horizon: int = 16
-    n_action_steps: int = 8
+    n_obs_steps: int = 3
+    horizon: int = 8
+    n_action_steps: int = 6
 
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
@@ -89,7 +89,7 @@ class DP3Config(PreTrainedConfig):
     )
 
     # The original implementation doesn't sample frames for the last 7 steps
-    drop_n_last_frames: int = 7  # horizon - n_action_steps - n_obs_steps + 1
+    # drop_n_last_frames: int = 0  # horizon - n_action_steps - n_obs_steps + 1
 
     # Observation conditioning
     obs_as_global_cond: bool = True
@@ -97,7 +97,7 @@ class DP3Config(PreTrainedConfig):
     # U-Net architecture
     condition_type: str = "film"
     diffusion_step_embed_dim: int = 256
-    down_dims: tuple[int, ...] = (256, 512, 1024)
+    down_dims: tuple[int, ...] = (512, 1024, 2048)
     kernel_size: int = 5
     n_groups: int = 8
     use_down_condition: bool = True
@@ -105,7 +105,7 @@ class DP3Config(PreTrainedConfig):
     use_up_condition: bool = True
 
     # Point cloud encoder
-    encoder_output_dim: int = 256
+    encoder_output_dim: int = 64
     use_pc_color: bool = False
     pointnet_type: str = "pointnet"
     pointnet_use_layernorm: bool = False
@@ -125,8 +125,7 @@ class DP3Config(PreTrainedConfig):
     clip_sample_range: float = 1.0
 
     # Inference
-    num_inference_steps: int | None = None
-
+    num_inference_steps: int = 10
     # Loss computation
     do_mask_loss_for_padding: bool = False
 
