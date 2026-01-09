@@ -85,6 +85,18 @@ Convert and push to hub:
         --operation.type convert_to_video \
         --push_to_hub true
 
+Convert video dataset to image format (saves locally):
+    python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id lerobot/pusht_video \
+        --operation.type convert_to_image \
+        --operation.output_dir /path/to/output/pusht_image
+
+Convert video dataset and save with new repo_id:
+    python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id lerobot/pusht_video \
+        --new_repo_id lerobot/pusht_image \
+        --operation.type convert_to_image
+
 Using JSON config file:
     python -m lerobot.scripts.lerobot_edit_dataset \
         --config_path path/to/edit_config.json
@@ -97,6 +109,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
+import torch
 from tqdm import tqdm
 
 from lerobot.configs import parser
@@ -108,7 +121,7 @@ from lerobot.datasets.dataset_tools import (
 )
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.utils import write_stats, write_tasks
-from lerobot.datasets.video_utils import encode_video_frames, get_video_info
+from lerobot.datasets.video_utils import decode_video_frames, encode_video_frames, get_video_info
 from lerobot.utils.constants import HF_LEROBOT_HOME, OBS_IMAGE
 from lerobot.utils.utils import init_logging
 
@@ -151,9 +164,17 @@ class ConvertToVideoConfig:
 
 
 @dataclass
+class ConvertToImageConfig:
+    type: str = "convert_to_image"
+    output_dir: str | None = None
+    episode_indices: list[int] | None = None
+    num_workers: int = 4
+
+
+@dataclass
 class EditDatasetConfig:
     repo_id: str
-    operation: DeleteEpisodesConfig | SplitConfig | MergeConfig | RemoveFeatureConfig | ConvertToVideoConfig
+    operation: DeleteEpisodesConfig | SplitConfig | MergeConfig | RemoveFeatureConfig | ConvertToVideoConfig | ConvertToImageConfig
     root: str | None = None
     new_repo_id: str | None = None
     push_to_hub: bool = False
@@ -706,6 +727,323 @@ def handle_convert_to_video(cfg: EditDatasetConfig) -> None:
         logging.info("Dataset saved locally (not pushed to hub)")
 
 
+def decode_episode_videos_to_images(
+    dataset: LeRobotDataset,
+    new_meta: LeRobotDatasetMetadata,
+    episode_index: int,
+    num_workers: int = 4,
+) -> dict[str, dict]:
+    """Decode videos from a single episode and save as images.
+
+    Args:
+        dataset: Source dataset with videos
+        new_meta: Metadata object for the new image dataset
+        episode_index: Episode index to process
+        num_workers: Number of threads for parallel image saving
+
+    Returns:
+        Dictionary mapping frame indices to image paths
+    """
+    from PIL import Image
+
+    video_keys = dataset.meta.video_keys
+    episode_meta = dataset.meta.episodes[episode_index]
+    episode_length = episode_meta["length"]
+    fps = dataset.fps
+
+    # Create timestamps for all frames in the episode
+    timestamps = [i / fps for i in range(episode_length)]
+
+    for video_key in video_keys:
+        # Get video path
+        video_path = dataset.root / dataset.meta.get_video_file_path(episode_index, video_key)
+
+        # Get from_timestamp for this video
+        from_timestamp = episode_meta[f"videos/{video_key}/from_timestamp"]
+        shifted_timestamps = [from_timestamp + ts for ts in timestamps]
+
+        # Decode all frames from video
+        tolerance_s = 1.0 / fps  # Tolerance of one frame
+        frames = decode_video_frames(video_path, shifted_timestamps, tolerance_s)
+
+        # frames is a tensor of shape (num_frames, C, H, W) with values in [0, 1]
+        # Convert to uint8 images
+        frames_uint8 = (frames * 255).to(dtype=torch.uint8)
+
+        # Save each frame as an image
+        def save_frame(args):
+            frame_idx, frame_tensor = args
+            # Convert tensor (C, H, W) to PIL Image
+            # PyTorch tensor is (C, H, W), PIL expects (H, W, C)
+            frame_np = frame_tensor.permute(1, 2, 0).numpy()
+            img = Image.fromarray(frame_np)
+
+            # Determine image path using LeRobot's structure
+            img_path = new_meta.root / "images" / video_key / f"episode-{episode_index:06d}" / f"frame-{frame_idx:06d}.png"
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            img.save(img_path, quality=100)
+            return str(img_path)
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(save_frame, (i, frames_uint8[i])) for i in range(len(frames_uint8))]
+            for future in as_completed(futures):
+                future.result()  # Check for exceptions
+
+
+def convert_dataset_to_images(
+    dataset: LeRobotDataset,
+    output_dir: Path,
+    repo_id: str | None = None,
+    episode_indices: list[int] | None = None,
+    num_workers: int = 4,
+) -> LeRobotDataset:
+    """Convert video-based dataset to image-based dataset.
+
+    Creates a new LeRobotDataset with images instead of videos, following the proper
+    LeRobot dataset structure with images stored as PNG files.
+
+    Args:
+        dataset: The source LeRobot dataset with videos
+        output_dir: Directory to save the new image dataset
+        repo_id: Repository ID for the new dataset (default: original_id + "_image")
+        episode_indices: List of episode indices to convert (None = all episodes)
+        num_workers: Number of threads for parallel processing (default: 4)
+
+    Returns:
+        New LeRobotDataset with images
+    """
+    import torch
+
+    from lerobot.datasets.utils import write_info
+
+    # Check that it's a video dataset
+    if len(dataset.meta.video_keys) == 0:
+        raise ValueError(
+            f"This operation is for video datasets only. Image dataset provided: {dataset.repo_id}"
+        )
+
+    video_keys = dataset.meta.video_keys
+
+    # Determine which episodes to process
+    if episode_indices is None:
+        episode_indices = list(range(dataset.meta.total_episodes))
+
+    if repo_id is None:
+        repo_id = f"{dataset.repo_id}_image"
+
+    logging.info(
+        f"Converting {len(episode_indices)} episodes with {len(video_keys)} cameras from {dataset.repo_id}"
+    )
+
+    # Create new features dict, converting video features to image features
+    new_features = {}
+    for key, value in dataset.meta.features.items():
+        if key not in video_keys:
+            new_features[key] = value
+        else:
+            # Convert video key to image format
+            new_features[key] = value.copy()
+            new_features[key]["dtype"] = "image"  # Change dtype from "video" to "image"
+            # Remove video-specific info if present
+            if "info" in new_features[key]:
+                del new_features[key]["info"]
+
+    # Create new metadata for image dataset
+    new_meta = LeRobotDatasetMetadata.create(
+        repo_id=repo_id,
+        fps=dataset.meta.fps,
+        features=new_features,
+        robot_type=dataset.meta.robot_type,
+        root=output_dir,
+        use_videos=False,
+        chunks_size=dataset.meta.chunks_size,
+        data_files_size_in_mb=dataset.meta.data_files_size_in_mb,
+        video_files_size_in_mb=dataset.meta.video_files_size_in_mb,
+    )
+
+    # Process each episode
+    all_episode_metadata = []
+
+    for ep_idx in tqdm(episode_indices, desc="Converting episodes to images"):
+        # Get episode metadata from source
+        src_episode = dataset.meta.episodes[ep_idx]
+
+        # Decode videos and save as images
+        decode_episode_videos_to_images(
+            dataset=dataset,
+            new_meta=new_meta,
+            episode_index=ep_idx,
+            num_workers=num_workers,
+        )
+
+        # Build episode metadata (without video-specific fields)
+        episode_meta = {
+            "episode_index": ep_idx,
+            "length": src_episode["length"],
+            "dataset_from_index": src_episode["dataset_from_index"],
+            "dataset_to_index": src_episode["dataset_to_index"],
+        }
+
+        # Add data chunk/file info (using same structure as source)
+        if "data/chunk_index" in src_episode:
+            episode_meta["data/chunk_index"] = src_episode["data/chunk_index"]
+            episode_meta["data/file_index"] = src_episode["data/file_index"]
+
+        all_episode_metadata.append(episode_meta)
+
+    # Copy and transform data files (adding image columns)
+    _copy_data_with_images(dataset, new_meta, episode_indices, video_keys)
+
+    # Save episode metadata
+    episodes_df = pd.DataFrame(all_episode_metadata)
+    episodes_path = new_meta.root / "meta" / "episodes" / "chunk-000" / "file-000.parquet"
+    episodes_path.parent.mkdir(parents=True, exist_ok=True)
+    episodes_df.to_parquet(episodes_path, index=False)
+
+    # Update metadata info
+    new_meta.info["total_episodes"] = len(episode_indices)
+    new_meta.info["total_frames"] = sum(ep["length"] for ep in all_episode_metadata)
+    new_meta.info["total_tasks"] = dataset.meta.total_tasks
+    new_meta.info["splits"] = {"train": f"0:{len(episode_indices)}"}
+
+    write_info(new_meta.info, new_meta.root)
+
+    # Copy stats and tasks
+    if dataset.meta.stats is not None:
+        # Remove video stats (if any) - typically stats are only for non-visual features
+        new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in video_keys}
+        write_stats(new_stats, new_meta.root)
+
+    if dataset.meta.tasks is not None:
+        write_tasks(dataset.meta.tasks, new_meta.root)
+
+    logging.info(f"✓ Completed converting {dataset.repo_id} to image format")
+    logging.info(f"New dataset saved to: {output_dir}")
+
+    # Return new dataset
+    return LeRobotDataset(repo_id=repo_id, root=output_dir)
+
+
+def _copy_data_with_images(
+    src_dataset: LeRobotDataset,
+    dst_meta: LeRobotDatasetMetadata,
+    episode_indices: list[int],
+    video_keys: list[str],
+) -> None:
+    """Copy data files and add image references.
+
+    Args:
+        src_dataset: Source dataset
+        dst_meta: Destination metadata
+        episode_indices: Episodes to include
+        video_keys: Video keys to convert to image references
+    """
+    import datasets
+    import pyarrow.parquet as pq
+    from PIL import Image
+
+    from lerobot.datasets.utils import DATA_DIR, embed_images, get_hf_features_from_features
+
+    data_dir = src_dataset.root / DATA_DIR
+    parquet_files = sorted(data_dir.glob("*/*.parquet"))
+
+    if not parquet_files:
+        raise ValueError(f"No parquet files found in {data_dir}")
+
+    episode_set = set(episode_indices)
+
+    for src_path in tqdm(parquet_files, desc="Processing data files"):
+        df = pd.read_parquet(src_path).reset_index(drop=True)
+
+        # Filter to only include selected episodes
+        df = df[df["episode_index"].isin(episode_set)].copy()
+
+        if len(df) == 0:
+            continue
+
+        # Add image path references for each video key
+        for video_key in video_keys:
+            image_paths = []
+            for _, row in df.iterrows():
+                ep_idx = int(row["episode_index"])
+                frame_idx = int(row["frame_index"])
+                img_path = dst_meta.root / "images" / video_key / f"episode-{ep_idx:06d}" / f"frame-{frame_idx:06d}.png"
+                # Load the actual image and store as PIL Image
+                if img_path.exists():
+                    img = Image.open(img_path)
+                    image_paths.append(img)
+                else:
+                    raise FileNotFoundError(f"Image not found: {img_path}")
+            df[video_key] = image_paths
+
+        # Get chunk and file indices from path
+        relative_path = src_path.relative_to(src_dataset.root)
+        chunk_dir = relative_path.parts[1]
+        file_name = relative_path.parts[2]
+        chunk_idx = int(chunk_dir.split("-")[1])
+        file_idx = int(file_name.split("-")[1].split(".")[0])
+
+        # Write to destination with proper embedding
+        dst_path = dst_meta.root / f"data/chunk-{chunk_idx:03d}/file-{file_idx:03d}.parquet"
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert to HF dataset and embed images properly
+        hf_features = get_hf_features_from_features(dst_meta.features)
+        ep_dataset = datasets.Dataset.from_dict(df.to_dict(orient="list"), features=hf_features, split="train")
+        ep_dataset = embed_images(ep_dataset)
+
+        # Write with proper schema
+        table = ep_dataset.with_format("arrow")[:]
+        writer = pq.ParquetWriter(dst_path, schema=table.schema, compression="snappy", use_dictionary=True)
+        writer.write_table(table)
+        writer.close()
+
+
+def handle_convert_to_image(cfg: EditDatasetConfig) -> None:
+    """Handle the convert_to_image operation."""
+    import torch  # noqa: F401
+
+    dataset = LeRobotDataset(cfg.repo_id, root=cfg.root)
+
+    # Determine output directory and repo_id
+    output_dir_config = getattr(cfg.operation, "output_dir", None)
+
+    if cfg.new_repo_id:
+        output_repo_id = cfg.new_repo_id
+        output_dir = Path(cfg.root) / cfg.new_repo_id if cfg.root else HF_LEROBOT_HOME / cfg.new_repo_id
+        logging.info(f"Saving to new dataset: {cfg.new_repo_id}")
+    elif output_dir_config:
+        output_dir = Path(output_dir_config)
+        output_repo_id = output_dir.name
+        logging.info(f"Saving to local directory: {output_dir}")
+    else:
+        output_repo_id = f"{cfg.repo_id}_image"
+        output_dir = Path(cfg.root) / output_repo_id if cfg.root else HF_LEROBOT_HOME / output_repo_id
+        logging.info(f"Saving to auto-generated location: {output_dir}")
+
+    logging.info(f"Converting dataset {cfg.repo_id} to image format")
+
+    new_dataset = convert_dataset_to_images(
+        dataset=dataset,
+        output_dir=output_dir,
+        repo_id=output_repo_id,
+        episode_indices=getattr(cfg.operation, "episode_indices", None),
+        num_workers=getattr(cfg.operation, "num_workers", 4),
+    )
+
+    logging.info("Image dataset created successfully!")
+    logging.info(f"Location: {output_dir}")
+    logging.info(f"Episodes: {new_dataset.meta.total_episodes}")
+    logging.info(f"Frames: {new_dataset.meta.total_frames}")
+
+    if cfg.push_to_hub:
+        logging.info(f"Pushing to hub as {output_repo_id}...")
+        new_dataset.push_to_hub()
+        logging.info("✓ Successfully pushed to hub!")
+    else:
+        logging.info("Dataset saved locally (not pushed to hub)")
+
+
 @parser.wrap()
 def edit_dataset(cfg: EditDatasetConfig) -> None:
     operation_type = cfg.operation.type
@@ -720,10 +1058,12 @@ def edit_dataset(cfg: EditDatasetConfig) -> None:
         handle_remove_feature(cfg)
     elif operation_type == "convert_to_video":
         handle_convert_to_video(cfg)
+    elif operation_type == "convert_to_image":
+        handle_convert_to_image(cfg)
     else:
         raise ValueError(
             f"Unknown operation type: {operation_type}\n"
-            f"Available operations: delete_episodes, split, merge, remove_feature, convert_to_video"
+            f"Available operations: delete_episodes, split, merge, remove_feature, convert_to_video, convert_to_image"
         )
 
 
