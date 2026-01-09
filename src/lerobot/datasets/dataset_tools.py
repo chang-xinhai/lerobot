@@ -498,6 +498,8 @@ def _copy_and_reindex_data(
         all_task_indices = set()
         for src_path in file_to_episodes:
             df = pd.read_parquet(src_dataset.root / src_path)
+            # Convert PyArrow extension dtypes to numpy to avoid dtype comparison issues
+            df = _convert_extension_dtypes_to_numpy(df)
             mask = df["episode_index"].isin(list(episode_mapping.keys()))
             task_series: pd.Series = df[mask]["task_index"]
             all_task_indices.update(task_series.unique().tolist())
@@ -513,6 +515,9 @@ def _copy_and_reindex_data(
 
     for src_path in tqdm(sorted(file_to_episodes.keys()), desc="Processing data files"):
         df = pd.read_parquet(src_dataset.root / src_path)
+        
+        # Convert PyArrow extension dtypes to numpy to avoid dtype comparison issues
+        df = _convert_extension_dtypes_to_numpy(df)
 
         all_episodes_in_file = set(df["episode_index"].unique())
         episodes_to_keep = file_to_episodes[src_path]
@@ -903,6 +908,26 @@ def _copy_and_reindex_episodes_metadata(
     write_stats(filtered_stats, dst_meta.root)
 
 
+def _convert_extension_dtypes_to_numpy(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert PyArrow extension dtypes to numpy arrays to avoid dtype comparison issues.
+    
+    When datasets library is imported, pd.read_parquet() creates PandasArrayExtensionDtype
+    for array columns. These need to be converted to standard Python/numpy objects before
+    pandas operations like .replace(), .isin(), etc. to avoid AttributeError: 
+    'PandasArrayExtensionDtype' object has no attribute 'v'.
+    
+    The most reliable way to handle this is to convert through dict and back.
+    
+    Args:
+        df: DataFrame potentially containing PyArrow extension dtypes
+        
+    Returns:
+        DataFrame with extension dtypes converted to numpy arrays
+    """
+    # Convert to dict and back - this materializes all extension types into native Python/numpy objects
+    return pd.DataFrame(df.to_dict(orient="list"))
+
+
 def _write_parquet(df: pd.DataFrame, path: Path, meta: LeRobotDatasetMetadata) -> None:
     """Write DataFrame to parquet
 
@@ -973,6 +998,9 @@ def _copy_data_with_feature_changes(
 
     for src_path in tqdm(parquet_files, desc="Processing data files"):
         df = pd.read_parquet(src_path).reset_index(drop=True)
+        
+        # Convert PyArrow extension dtypes to numpy to avoid dtype comparison issues
+        df = _convert_extension_dtypes_to_numpy(df)
 
         relative_path = src_path.relative_to(dataset.root)
         chunk_dir = relative_path.parts[1]
