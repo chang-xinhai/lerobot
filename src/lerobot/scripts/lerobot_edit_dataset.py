@@ -337,6 +337,9 @@ def save_episode_images_for_video(
     # Create directory
     imgs_dir.mkdir(parents=True, exist_ok=True)
 
+    # Ensure dataset is loaded
+    dataset._ensure_hf_dataset_loaded()
+
     # Get dataset without torch format for PIL image access
     hf_dataset = dataset.hf_dataset.with_format(None)
 
@@ -479,11 +482,17 @@ def convert_dataset_to_videos(
     Returns:
         New LeRobotDataset with videos
     """
+    from lerobot.datasets.utils import load_episodes
+
     # Check that it's an image dataset
     if len(dataset.meta.video_keys) > 0:
         raise ValueError(
             f"This operation is for image datasets only. Video dataset provided: {dataset.repo_id}"
         )
+
+    # Ensure episodes are loaded
+    if dataset.meta.episodes is None:
+        dataset.meta.episodes = load_episodes(dataset.meta.root)
 
     # Get all image keys
     hf_dataset = dataset.hf_dataset.with_format(None)
@@ -762,9 +771,9 @@ def decode_episode_videos_to_images(
         from_timestamp = episode_meta[f"videos/{video_key}/from_timestamp"]
         shifted_timestamps = [from_timestamp + ts for ts in timestamps]
 
-        # Decode all frames from video
+        # Decode all frames from video using pyav backend (fallback for environments without torchcodec)
         tolerance_s = 1.0 / fps  # Tolerance of one frame
-        frames = decode_video_frames(video_path, shifted_timestamps, tolerance_s)
+        frames = decode_video_frames(video_path, shifted_timestamps, tolerance_s, backend="pyav")
 
         # frames is a tensor of shape (num_frames, C, H, W) with values in [0, 1]
         # Convert to uint8 images
@@ -812,15 +821,17 @@ def convert_dataset_to_images(
     Returns:
         New LeRobotDataset with images
     """
-    import torch
-
-    from lerobot.datasets.utils import write_info
+    from lerobot.datasets.utils import load_episodes, write_info
 
     # Check that it's a video dataset
     if len(dataset.meta.video_keys) == 0:
         raise ValueError(
             f"This operation is for video datasets only. Image dataset provided: {dataset.repo_id}"
         )
+
+    # Ensure episodes are loaded
+    if dataset.meta.episodes is None:
+        dataset.meta.episodes = load_episodes(dataset.meta.root)
 
     video_keys = dataset.meta.video_keys
 
