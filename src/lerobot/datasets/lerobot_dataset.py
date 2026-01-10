@@ -1037,6 +1037,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.num_frames
 
+    # https://github.com/huggingface/lerobot/issues/93， not solving the slow indexing issue yet
     def __getitem__(self, idx) -> dict:
         # Ensure dataset is loaded when we actually need to read from it
         self._ensure_hf_dataset_loaded()
