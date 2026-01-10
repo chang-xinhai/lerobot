@@ -1631,6 +1631,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj._lazy_loading = False
         obj._recorded_frames = 0
         obj._writer_closed_for_reading = False
+        obj.preload = False  # Preload not applicable for recording datasets
+        obj._preloaded_items = None
         return obj
 
 
