@@ -75,23 +75,41 @@ lerobot-train \
   --wandb.enable=false \
   --output_dir=outputs/train/act_$exp_name 
 
-exp_name="multi_object_open_7221_scene_0_seed_0_test"
+exp_name="multi_object_open_7221_scene_0_seed_0"
 rm -rf outputs/train/dp3_$exp_name
 lerobot-train \
   --policy.type=dp3 \
   --batch_size=128 \
-  --steps=10000 \
+  --steps=100000 \
   --log_freq=50 \
   --eval_freq=500 \
   --save_freq=5000 \
   --job_name=dp3_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=data/$exp_name \
+  --dataset.preload=true \
   --policy.push_to_hub=false \
   --policy.device=cuda \
-  --wandb.enable=false \
+  --wandb.enable=true \
   --output_dir=outputs/train/dp3_$exp_name 
 
+lerobot-train \
+  --policy.type=dp3 \
+  --batch_size=128 \
+  --steps=100000 \
+  --log_freq=50 \
+  --eval_freq=500 \
+  --save_freq=5000 \
+  --job_name=dp3_$exp_name \
+  --dataset.repo_id=$exp_name \
+  --dataset.root=data/$exp_name \
+  --dataset.preload=true \
+  --policy.push_to_hub=false \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --output_dir=outputs/train/dp3_$exp_name \
+  --resume=true \
+  --config_path=outputs/train/dp3_multi_object_open_7221_scene_0_seed_0/checkpoints/last/pretrained_model/train_config.json
 
 exp_name="multi_object_open_7221_scene_0_seed_0"
 rm -rf outputs/train/dp_$exp_name
@@ -123,6 +141,12 @@ python -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
         --operation.type remove_feature \
         --operation.feature_names "['observation.images.ego_topdown', 'observation.images.ego_wrist', 'observation.images.fix_local', 'observation.depth.ego_topdown', 'observation.depth.ego_wrist', 'observation.depth.fix_local', 'observation.eef']"
+
+python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
+        --operation.type remove_feature \
+        --operation.feature_names "['observation.images.ego_topdown', 'observation.images.ego_wrist', 'observation.images.fix_local', 'observation.depth.ego_topdown', 'observation.depth.ego_wrist', 'observation.depth.fix_local', 'observation.eef']"
+
 
 python -m lerobot.scripts.lerobot_edit_dataset \
       --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
