@@ -1392,3 +1392,89 @@ def test_valid_video_codecs_constant():
     assert "hevc" in VALID_VIDEO_CODECS
     assert "libsvtav1" in VALID_VIDEO_CODECS
     assert len(VALID_VIDEO_CODECS) == 3
+
+
+def test_dataset_preload(tmp_path, lerobot_dataset_factory):
+    """Test that dataset preload functionality works correctly."""
+    # Create a small dataset without videos for faster testing
+    dataset_no_preload = lerobot_dataset_factory(
+        root=tmp_path / "no_preload",
+        total_episodes=2,
+        total_frames=10,
+        use_videos=False,
+        preload=False,
+    )
+    
+    dataset_with_preload = lerobot_dataset_factory(
+        root=tmp_path / "with_preload",
+        total_episodes=2,
+        total_frames=10,
+        use_videos=False,
+        preload=True,
+    )
+    
+    # Verify preload attributes are set correctly
+    assert dataset_no_preload.preload is False
+    assert dataset_no_preload._preloaded_items is None
+    
+    assert dataset_with_preload.preload is True
+    assert dataset_with_preload._preloaded_items is not None
+    assert len(dataset_with_preload._preloaded_items) == len(dataset_with_preload)
+    
+    # Verify that both datasets return the same items
+    for idx in range(len(dataset_no_preload)):
+        item_no_preload = dataset_no_preload[idx]
+        item_with_preload = dataset_with_preload[idx]
+        
+        # Check that all keys are the same
+        assert set(item_no_preload.keys()) == set(item_with_preload.keys())
+        
+        # Check that values match for each key
+        for key in item_no_preload.keys():
+            if isinstance(item_no_preload[key], torch.Tensor):
+                assert torch.equal(item_no_preload[key], item_with_preload[key]), f"Mismatch in key {key} at index {idx}"
+            else:
+                assert item_no_preload[key] == item_with_preload[key], f"Mismatch in key {key} at index {idx}"
+
+
+def test_dataset_preload_with_transforms(tmp_path, lerobot_dataset_factory):
+    """Test that dataset preload works correctly with image transforms."""
+    import torchvision.transforms.v2 as transforms
+    
+    # Create a simple transform
+    transform = transforms.Compose([
+        transforms.Resize((32, 32)),
+    ])
+    
+    # Create datasets with and without preload, both with transforms
+    dataset_no_preload = lerobot_dataset_factory(
+        root=tmp_path / "no_preload_transform",
+        total_episodes=1,
+        total_frames=5,
+        use_videos=False,
+        preload=False,
+        image_transforms=transform,
+    )
+    
+    dataset_with_preload = lerobot_dataset_factory(
+        root=tmp_path / "with_preload_transform",
+        total_episodes=1,
+        total_frames=5,
+        use_videos=False,
+        preload=True,
+        image_transforms=transform,
+    )
+    
+    # Verify that both datasets return the same items
+    for idx in range(len(dataset_no_preload)):
+        item_no_preload = dataset_no_preload[idx]
+        item_with_preload = dataset_with_preload[idx]
+        
+        # Check that all keys match
+        assert set(item_no_preload.keys()) == set(item_with_preload.keys())
+        
+        # Check image transforms were applied in both cases
+        if "observation.images.laptop" in item_no_preload:
+            assert item_no_preload["observation.images.laptop"].shape[-2:] == (32, 32)
+            assert item_with_preload["observation.images.laptop"].shape[-2:] == (32, 32)
+

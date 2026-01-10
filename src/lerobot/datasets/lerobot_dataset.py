@@ -572,6 +572,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         video_backend: str | None = None,
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
+        preload: bool = False,
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -687,6 +688,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
             vcodec (str, optional): Video codec for encoding videos during recording. Options: 'h264', 'hevc',
                 'libsvtav1'. Defaults to 'libsvtav1'. Use 'h264' for faster encoding on systems where AV1
                 encoding is CPU-heavy.
+            preload (bool, optional): If True, preloads all dataset items into memory during initialization.
+                This can significantly speed up data access for small datasets by avoiding repeated computation
+                in __getitem__. Defaults to False.
         """
         super().__init__()
         if vcodec not in VALID_VIDEO_CODECS:
@@ -750,6 +754,18 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.delta_timestamps is not None:
             check_delta_timestamps(self.delta_timestamps, self.fps, self.tolerance_s)
             self.delta_indices = get_delta_indices(self.delta_timestamps, self.fps)
+
+        # Preload dataset items if requested
+        self.preload = preload
+        self._preloaded_items: list[dict] | None = None
+        if self.preload:
+            logging.info(f"Preloading {len(self)} items into memory...")
+            self._preloaded_items = []
+            for idx in range(len(self)):
+                # Call the original __getitem__ logic to compute each item
+                item = self._compute_item(idx)
+                self._preloaded_items.append(item)
+            logging.info("Preloading complete.")
 
     def _close_writer(self) -> None:
         """Close and cleanup the parquet writer if it exists."""
@@ -1037,8 +1053,15 @@ class LeRobotDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.num_frames
 
-    # https://github.com/huggingface/lerobot/issues/93， not solving the slow indexing issue yet
-    def __getitem__(self, idx) -> dict:
+    def _compute_item(self, idx: int) -> dict:
+        """Compute a single item from the dataset. This is the core logic for data retrieval.
+        
+        Args:
+            idx: Index of the item to retrieve
+            
+        Returns:
+            Dictionary containing the item data
+        """
         # Ensure dataset is loaded when we actually need to read from it
         self._ensure_hf_dataset_loaded()
         item = self.hf_dataset[idx]
@@ -1067,6 +1090,12 @@ class LeRobotDataset(torch.utils.data.Dataset):
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks.iloc[task_idx].name
         return item
+
+    # https://github.com/huggingface/lerobot/issues/93， not solving the slow indexing issue yet
+    def __getitem__(self, idx) -> dict:
+        if self.preload and self._preloaded_items is not None:
+            return self._preloaded_items[idx]
+        return self._compute_item(idx)
 
     def __repr__(self):
         feature_keys = list(self.features)
