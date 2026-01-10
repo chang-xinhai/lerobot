@@ -113,10 +113,17 @@ lerobot-train \
 
 
 # Convert data
+rm -rf /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test_image
 python -m lerobot.scripts.lerobot_edit_dataset \
       --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
       --operation.type convert_to_image \
       --operation.output_dir /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test_image
+
+python -m lerobot.scripts.lerobot_edit_dataset \
+      --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
+      --operation.type convert_to_image \
+      --operation.output_dir /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_image
+
 
 python -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \

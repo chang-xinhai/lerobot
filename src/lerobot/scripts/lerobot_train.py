@@ -260,8 +260,9 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         accelerator = Accelerator(step_scheduler_with_optimizer=False, kwargs_handlers=[ddp_kwargs])
-
+    
     init_logging(accelerator=accelerator)
+    # init_logging(accelerator=accelerator, console_level="DEBUG", file_level="DEBUG")
 
     # Determine if this is the main process (for logging and checkpointing)
     # When using accelerate, only the main process should log to avoid duplicate outputs
@@ -473,10 +474,22 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         )
 
     for _ in range(step, cfg.steps):
+        if is_main_process:
+            logging.info(f"Starting step {step + 1}/{cfg.steps}")
+        
+        # Detailed timing for data loading
         start_time = time.perf_counter()
         batch = next(dl_iter)
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
+
+        if is_main_process:
+            logging.info(f"Data loading took {train_tracker.dataloading_s.val:.2f}s")
+            
+        if is_main_process and train_tracker.dataloading_s.val > 5.0:
+            logging.warning(
+                f"SLOW DATA LOADING at step {step + 1} : total={train_tracker.dataloading_s.val:.2f}s "
+            )
 
         train_tracker, output_dict = update_policy(
             train_tracker,

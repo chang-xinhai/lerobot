@@ -613,7 +613,10 @@ def convert_dataset_to_videos(
         # Copy stats and tasks
         if dataset.meta.stats is not None:
             # Remove image stats
-            new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in img_keys}
+            # new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in img_keys}
+            
+            # Keep all stats but adjust for key changes if needed
+            new_stats = dataset.meta.stats.copy()
             write_stats(new_stats, new_meta.root)
 
         if dataset.meta.tasks is not None:
@@ -922,7 +925,10 @@ def convert_dataset_to_images(
     # Copy stats and tasks
     if dataset.meta.stats is not None:
         # Remove video stats (if any) - typically stats are only for non-visual features
-        new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in video_keys}
+        # new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in video_keys}
+        
+        # Keep all stats but adjust for key changes if needed
+        new_stats = dataset.meta.stats.copy()
         write_stats(new_stats, new_meta.root)
 
     if dataset.meta.tasks is not None:
