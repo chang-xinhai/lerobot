@@ -87,6 +87,7 @@ lerobot-train \
   --job_name=dp3_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=data/$exp_name \
+  --dataset.preload=true \
   --policy.push_to_hub=false \
   --policy.device=cuda \
   --wandb.enable=false \
@@ -123,6 +124,12 @@ python -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
         --operation.type remove_feature \
         --operation.feature_names "['observation.images.ego_topdown', 'observation.images.ego_wrist', 'observation.images.fix_local', 'observation.depth.ego_topdown', 'observation.depth.ego_wrist', 'observation.depth.fix_local', 'observation.eef']"
+
+python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
+        --operation.type remove_feature \
+        --operation.feature_names "['observation.images.ego_topdown', 'observation.images.ego_wrist', 'observation.images.fix_local', 'observation.depth.ego_topdown', 'observation.depth.ego_wrist', 'observation.depth.fix_local', 'observation.eef']"
+
 
 python -m lerobot.scripts.lerobot_edit_dataset \
       --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \

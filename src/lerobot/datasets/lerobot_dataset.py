@@ -761,7 +761,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.preload:
             logging.info(f"Preloading {len(self)} items into memory...")
             self._preloaded_items = []
-            for idx in range(len(self)):
+            from tqdm.auto import tqdm
+            for idx in tqdm(range(len(self)), desc=f"Preloading {self.repo_id}", unit="item"):
                 # Call the original __getitem__ logic to compute each item
                 item = self._compute_item(idx)
                 self._preloaded_items.append(item)
