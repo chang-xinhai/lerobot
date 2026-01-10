@@ -300,6 +300,10 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # Now all other processes can safely load the dataset
     if not is_main_process:
         dataset = make_dataset(cfg)
+    
+    # Enable torch format for datasets to return torch tensors directly
+    # Issue: "https://github.com/huggingface/lerobot/issues/1282", changing "datasets>=2.19.0", to "datasets>=2.19.0,<4.0.0", in pyproject.toml
+    # dataset.hf_dataset.set_format(type="torch")
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -475,7 +479,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     for _ in range(step, cfg.steps):
         if is_main_process:
-            logging.info(f"Starting step {step + 1}/{cfg.steps}")
+            logging.debug(f"Starting step {step + 1}/{cfg.steps}")
         
         # Detailed timing for data loading
         start_time = time.perf_counter()
@@ -484,7 +488,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         if is_main_process:
-            logging.info(f"Data loading took {train_tracker.dataloading_s.val:.2f}s")
+            logging.debug(f"Data loading took {train_tracker.dataloading_s.val:.2f}s")
             
         if is_main_process and train_tracker.dataloading_s.val > 5.0:
             logging.warning(
