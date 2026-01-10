@@ -75,7 +75,7 @@ lerobot-train \
   --wandb.enable=false \
   --output_dir=outputs/train/act_$exp_name 
 
-exp_name="multi_object_open_7221_scene_0_seed_0"
+exp_name="multi_object_open_7221_scene_0_seed_0_test"
 rm -rf outputs/train/dp3_$exp_name
 lerobot-train \
   --policy.type=dp3 \
@@ -118,6 +118,11 @@ python -m lerobot.scripts.lerobot_edit_dataset \
       --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
       --operation.type convert_to_image \
       --operation.output_dir /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test_image
+
+python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
+        --operation.type remove_feature \
+        --operation.feature_names "['observation.images.ego_topdown', 'observation.images.ego_wrist', 'observation.images.fix_local', 'observation.depth.ego_topdown', 'observation.depth.ego_wrist', 'observation.depth.fix_local', 'observation.eef']"
 
 python -m lerobot.scripts.lerobot_edit_dataset \
       --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
