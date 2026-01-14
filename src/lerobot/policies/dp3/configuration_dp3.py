@@ -89,7 +89,7 @@ class DP3Config(PreTrainedConfig):
     )
 
     # The original implementation doesn't sample frames for the last 7 steps
-    # drop_n_last_frames: int = 0  # horizon - n_action_steps - n_obs_steps + 1
+    drop_n_last_frames: int = 6  # horizon - n_action_steps - n_obs_steps + 1
 
     # Observation conditioning
     obs_as_global_cond: bool = True
