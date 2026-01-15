@@ -758,7 +758,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         # Preload dataset items if requested
         self.preload = preload
         self._preloaded_items: list[dict] | None = None
+        self._preloading = False
         if self.preload:
+            self._preloading = True
             logging.info(f"Preloading {len(self)} items into memory...")
             self._preloaded_items = []
             from tqdm.auto import tqdm
@@ -766,6 +768,12 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 # Call the original __getitem__ logic to compute each item
                 item = self._compute_item(idx)
                 self._preloaded_items.append(item)
+            # Drop the raw HF dataset to free memory once preloading is done.
+            # The preloaded items are sufficient for __getitem__ when preload=True.
+            self.hf_dataset = None
+            self._lazy_loading = False
+            self._writer_closed_for_reading = False
+            self._preloading = False
             logging.info("Preloading complete.")
 
     def _close_writer(self) -> None:
@@ -936,6 +944,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
         actual loaded data length (len(self.hf_dataset)) rather than metadata total_frames.
         self.meta.total_frames is the total number of frames in the full dataset.
         """
+        if self._preloading and self.hf_dataset is not None:
+            return len(self.hf_dataset) if self.episodes is not None else self.meta.total_frames
+        if self.preload and self._preloaded_items is not None:
+            return len(self._preloaded_items)
         if self.episodes is not None and self.hf_dataset is not None:
             return len(self.hf_dataset)
         return self.meta.total_frames
@@ -1043,6 +1055,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
     def _ensure_hf_dataset_loaded(self):
         """Lazy load the HF dataset only when needed for reading."""
+        if self.preload and self._preloaded_items is not None and not self._preloading:
+            return
         if self._lazy_loading or self.hf_dataset is None:
             # Close the writer before loading to ensure parquet file is properly finalized
             if self.writer is not None:
