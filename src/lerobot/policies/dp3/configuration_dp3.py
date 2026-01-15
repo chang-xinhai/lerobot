@@ -84,7 +84,7 @@ class DP3Config(PreTrainedConfig):
             "VISUAL": NormalizationMode.MEAN_STD,
             "STATE": NormalizationMode.MIN_MAX,
             "ACTION": NormalizationMode.MIN_MAX,
-            "POINTCLOUD": NormalizationMode.IDENTITY,
+            "POINTCLOUD": NormalizationMode.MIN_MAX,
         }
     )
 
@@ -96,7 +96,7 @@ class DP3Config(PreTrainedConfig):
 
     # U-Net architecture
     condition_type: str = "film"
-    diffusion_step_embed_dim: int = 256
+    diffusion_step_embed_dim: int = 64
     down_dims: tuple[int, ...] = (512, 1024, 2048)
     kernel_size: int = 5
     n_groups: int = 8
@@ -109,18 +109,18 @@ class DP3Config(PreTrainedConfig):
     use_pc_color: bool = False
     pointnet_type: str = "pointnet"
     pointnet_use_layernorm: bool = False
-    pointnet_final_norm: str = "none"
+    pointnet_final_norm: str = "layernorm"  # layernorm, none
 
     # State encoder
     state_mlp_size: tuple[int, ...] = (64, 64)
 
     # Noise scheduler
-    noise_scheduler_type: str = "DDPM"
+    noise_scheduler_type: str = "DDIM"
     num_train_timesteps: int = 100
     beta_schedule: str = "squaredcos_cap_v2"
     beta_start: float = 0.0001
     beta_end: float = 0.02
-    prediction_type: str = "epsilon"
+    prediction_type: str = "sample"
     clip_sample: bool = True
     clip_sample_range: float = 1.0
 

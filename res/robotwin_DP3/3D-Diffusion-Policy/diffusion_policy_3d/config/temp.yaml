@@ -1,15 +1,16 @@
 defaults:
-  - task: adroit_hammer
+  - _self_
+  - task: ???
 
-name: train_dp3
+name: dp3
 
-task_name: ${task.name}
+task_name: null
 shape_meta: ${task.shape_meta}
 exp_name: "debug"
 
-horizon: 4
-n_obs_steps: 2
-n_action_steps: 4
+horizon: 8
+n_obs_steps: 3
+n_action_steps: 6
 n_latency_steps: 0
 dataset_obs_steps: ${n_obs_steps}
 keypoint_visible_rate: 1.0
@@ -23,7 +24,7 @@ policy:
   use_mid_condition: true
   use_up_condition: true
   
-  diffusion_step_embed_dim: 128
+  diffusion_step_embed_dim: 64
   down_dims:
   - 512
   - 1024
@@ -31,7 +32,7 @@ policy:
   crop_shape:
   - 80
   - 80
-  encoder_output_dim: 64
+  encoder_output_dim: 64 # dual 128, raw 64
   horizon: ${horizon}
   kernel_size: 5
   n_action_steps: ${n_action_steps}
@@ -49,7 +50,7 @@ policy:
     steps_offset: 0
     prediction_type: sample
 
-]
+
   num_inference_steps: 10
   obs_as_global_cond: true
   shape_meta: ${shape_meta}
@@ -75,14 +76,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 128
+  batch_size: 256
   num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 128
+  batch_size: 256
   num_workers: 8
   shuffle: False
   pin_memory: True
@@ -102,13 +103,13 @@ training:
   resume: True
   lr_scheduler: cosine
   lr_warmup_steps: 500
-  num_epochs: 3000
+  num_epochs: 300
   gradient_accumulate_every: 1
   use_ema: True
-  rollout_every: 200
-  checkpoint_every: 1
-  val_every: 1
-  sample_every: 5
+  rollout_every: 100
+  checkpoint_every: 100
+  val_every: 10
+  sample_every: 20
   max_train_steps: null
   max_val_steps: null
   tqdm_interval_sec: 1.0
@@ -117,26 +118,23 @@ logging:
   group: ${exp_name}
   id: null
   mode: online
-  name: ${training.seed}
-  project: dp3
-  resume: true
+  name: ${exp_name}
+  project: RoboTwin
+  resume: never
   tags:
-  - dp3
+  - RoboTwin
 
 checkpoint:
-  save_ckpt: True # if True, save checkpoint every checkpoint_every
+  save_ckpt: False # if True, save checkpoint every checkpoint_every
   topk:
     monitor_key: test_mean_score
     mode: max
     k: 1
-    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    # format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    format_str: 'last.ckpt'
   save_last_ckpt: True # this only saves when save_ckpt is True
   save_last_snapshot: False
-
-multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
-
+  
 hydra:
   job:
     override_dirname: ${name}
@@ -145,3 +143,44 @@ hydra:
   sweep:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
     subdir: ${hydra.job.num}
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+checkpoint_num: 3000
+expert_data_num: 100
+raw_task_name: none
+setting: none
+
+
+name: ${task_name}-${setting}-${expert_data_num}
+
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  obs:
+    point_cloud:
+      shape: [1024, 6]
+      type: point_cloud
+    agent_pos:
+      shape: [11]  # r1: 21dim, summit_franka : 11dim
+      type: low_dim
+  action:
+    shape: [11] # r1: 21dim, summit_franka : 11dim
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.robot_runner.RobotRunner
+  max_steps: 300
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  task_name: robot
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.robot_dataset.RobotDataset
+  zarr_path: ../../../data/${task.name}.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 0
+  val_ratio: 0.02
+  max_train_episodes: null
