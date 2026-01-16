@@ -55,29 +55,54 @@ lerobot-train \
 
 # DEBUG RUNS
 
-exp_name="multi_object_open_7221_scene_0_seed_0"
+
+exp_name="multi_object_open_103634_scene_3_seed_3"
+# exp_name="multi_object_open_11622_scene_25_seed_25"
 rm -rf outputs/train/act_$exp_name
-lerobot-train \
+CUDA_VISIBLE_DEVICES=2 lerobot-train \
   --policy.type=act \
   --batch_size=10 \
-  --steps=10000 \
+  --steps=300000 \
   --log_freq=50 \
   --eval_freq=500 \
-  --save_freq=5000 \
+  --save_freq=10000 \
   --job_name=act_$exp_name \
   --dataset.repo_id=$exp_name \
-  --dataset.root=data/$exp_name \
+  --dataset.root=data//test_3/$exp_name \
   --policy.chunk_size=16 \
   --policy.n_action_steps=16 \
   --policy.optimizer_lr=1e-4 \
   --policy.push_to_hub=false \
   --policy.device=cuda \
   --wandb.enable=false \
-  --output_dir=outputs/train/act_$exp_name 
+  --output_dir=outputs/train/act_$exp_name \
+  --dataset.preload=true
+
+
+exp_name="multi_object_open_7221_scene_0_seed_0"
+rm -rf outputs/train/act_$exp_name
+CUDA_VISIBLE_DEVICES=1 lerobot-train \
+  --policy.type=act \
+  --batch_size=10 \
+  --steps=300000 \
+  --log_freq=50 \
+  --eval_freq=500 \
+  --save_freq=10000 \
+  --job_name=act_$exp_name \
+  --dataset.repo_id=$exp_name \
+  --dataset.root=data//test_3/$exp_name \
+  --policy.chunk_size=16 \
+  --policy.n_action_steps=16 \
+  --policy.optimizer_lr=1e-4 \
+  --policy.push_to_hub=false \
+  --policy.device=cuda \
+  --wandb.enable=false \
+  --output_dir=outputs/train/act_$exp_name \
+  --dataset.preload=true
 
 exp_name="multi_object_open_7221_scene_0_seed_0"
 rm -rf outputs/train/dp3_$exp_name
-lerobot-train \
+CUDA_VISIBLE_DEVICES=0 lerobot-train \
   --policy.type=dp3 \
   --batch_size=128 \
   --steps=300000 \
