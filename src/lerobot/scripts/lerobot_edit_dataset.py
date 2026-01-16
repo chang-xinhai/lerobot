@@ -130,6 +130,7 @@ from lerobot.utils.utils import init_logging
 class DeleteEpisodesConfig:
     type: str = "delete_episodes"
     episode_indices: list[int] | None = None
+    backup: bool = True
 
 
 @dataclass
@@ -148,6 +149,7 @@ class MergeConfig:
 class RemoveFeatureConfig:
     type: str = "remove_feature"
     feature_names: list[str] | None = None
+    backup: bool = True
 
 
 @dataclass
@@ -228,6 +230,11 @@ def handle_delete_episodes(cfg: EditDatasetConfig) -> None:
     if cfg.push_to_hub:
         logging.info(f"Pushing to hub as {output_repo_id}")
         LeRobotDataset(output_repo_id, root=output_dir).push_to_hub()
+
+    if cfg.new_repo_id is None and not cfg.operation.backup:
+        logging.info(f"Removing backup directory {dataset.root}")
+        if dataset.root.exists():
+            shutil.rmtree(dataset.root)
 
 
 def handle_split(cfg: EditDatasetConfig) -> None:
@@ -316,6 +323,11 @@ def handle_remove_feature(cfg: EditDatasetConfig) -> None:
     if cfg.push_to_hub:
         logging.info(f"Pushing to hub as {output_repo_id}")
         LeRobotDataset(output_repo_id, root=output_dir).push_to_hub()
+
+    if cfg.new_repo_id is None and not cfg.operation.backup:
+        logging.info(f"Removing backup directory {dataset.root}")
+        if dataset.root.exists():
+            shutil.rmtree(dataset.root)
 
 
 def save_episode_images_for_video(
