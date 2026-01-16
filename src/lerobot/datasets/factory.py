@@ -19,6 +19,7 @@ from pprint import pformat
 import torch
 
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.configs.types import FeatureType
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.lerobot_dataset import (
     LeRobotDataset,
@@ -27,7 +28,8 @@ from lerobot.datasets.lerobot_dataset import (
 )
 from lerobot.datasets.streaming_dataset import StreamingLeRobotDataset
 from lerobot.datasets.transforms import ImageTransforms
-from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD
+from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_POINTCLOUD, OBS_PREFIX, OBS_STATE, REWARD
+from lerobot.datasets.utils import dataset_to_policy_features
 
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
@@ -36,7 +38,7 @@ IMAGENET_STATS = {
 
 
 def resolve_delta_timestamps(
-    cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata
+    cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata, allowed_keys: set[str] | None = None
 ) -> dict[str, list] | None:
     """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
 
@@ -55,6 +57,8 @@ def resolve_delta_timestamps(
     """
     delta_timestamps = {}
     for key in ds_meta.features:
+        if allowed_keys is not None and key not in allowed_keys:
+            continue
         if key == REWARD and cfg.reward_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
         if key == ACTION and cfg.action_delta_indices is not None:
@@ -66,6 +70,71 @@ def resolve_delta_timestamps(
         delta_timestamps = None
 
     return delta_timestamps
+
+
+def resolve_required_keys(
+    cfg: PreTrainedConfig | None, ds_meta: LeRobotDatasetMetadata
+) -> set[str] | None:
+    if cfg is None:
+        return None
+
+    policy_features = dataset_to_policy_features(ds_meta.features)
+    action_keys = {key for key, ft in policy_features.items() if ft.type is FeatureType.ACTION}
+
+    def _keys_by_types(types: set[FeatureType]) -> set[str]:
+        return {key for key, ft in policy_features.items() if ft.type in types}
+
+    # If the user explicitly configured input/output features, respect those.
+    if cfg.input_features:
+        input_keys = set(cfg.input_features.keys())
+    else:
+        if cfg.type == "dp3":
+            input_keys = {
+                key
+                for key in policy_features
+                if key in {OBS_STATE, OBS_POINTCLOUD} or "pointcloud" in key.lower()
+            }
+            logging.info(f"Resolved input keys for DP3 policy: {input_keys}")
+        elif cfg.type in {
+            "act",
+            "diffusion",
+            "vqbet",
+            "tdmpc",
+            "groot",
+            "sac",
+            "pi0",
+            "pi0_fast",
+            "pi05",
+            "smolvla",
+            "wall_x",
+            "xvla",
+            "rtc",
+            "sarm",
+        }:
+            input_keys = _keys_by_types(
+                {FeatureType.VISUAL, FeatureType.STATE, FeatureType.ENV, FeatureType.LANGUAGE}
+            )
+            input_keys = {
+                key
+                for key in input_keys
+                if key != OBS_POINTCLOUD and "pointcloud" not in key.lower()
+            }
+            logging.info(
+                f"Resolved input keys for {cfg.type} policy (typed selection): {input_keys}"
+            )
+        else:
+            input_keys = {key for key in policy_features if key not in action_keys}
+
+    if cfg.output_features:
+        output_keys = set(cfg.output_features.keys())
+    else:
+        output_keys = set(action_keys)
+
+    required_keys = input_keys | output_keys
+    if cfg.reward_delta_indices is not None and REWARD in ds_meta.features:
+        required_keys.add(REWARD)
+
+    return required_keys
 
 
 def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDataset:
@@ -88,7 +157,25 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
         ds_meta = LeRobotDatasetMetadata(
             cfg.dataset.repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
         )
-        delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
+        required_keys = (
+            resolve_required_keys(cfg.policy, ds_meta) if cfg.dataset.filter_features_by_policy else None
+        )
+        logging.info(f"Required keys: {pformat(required_keys)}")
+        delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta, allowed_keys=required_keys)
+
+        # If policy features are not provided, set them based on the resolved required keys.
+        if cfg.dataset.filter_features_by_policy and cfg.policy is not None and required_keys is not None:
+            policy_features = dataset_to_policy_features(ds_meta.features)
+            action_keys = {key for key, ft in policy_features.items() if ft.type is FeatureType.ACTION}
+            if not cfg.policy.input_features:
+                cfg.policy.input_features = {
+                    key: ft for key, ft in policy_features.items() if key in required_keys
+                    and key not in action_keys
+                }
+            if not cfg.policy.output_features:
+                cfg.policy.output_features = {
+                    key: ft for key, ft in policy_features.items() if key in action_keys
+                }
         if not cfg.dataset.streaming:
             dataset = LeRobotDataset(
                 cfg.dataset.repo_id,
@@ -100,6 +187,7 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
                 video_backend=cfg.dataset.video_backend,
                 tolerance_s=cfg.tolerance_s,
                 preload=cfg.dataset.preload,
+                requested_keys=required_keys,
             )
         else:
             dataset = StreamingLeRobotDataset(
@@ -111,6 +199,7 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
                 revision=cfg.dataset.revision,
                 max_num_shards=cfg.num_workers,
                 tolerance_s=cfg.tolerance_s,
+                requested_keys=required_keys,
             )
     else:
         raise NotImplementedError("The MultiLeRobotDataset isn't supported for now.")

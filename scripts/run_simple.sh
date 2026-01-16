@@ -57,6 +57,26 @@ lerobot-train \
 
 
 exp_name="multi_object_open_103634_scene_3_seed_3"
+rm -rf outputs/train/act_$exp_name
+CUDA_VISIBLE_DEVICES=3 lerobot-train \
+  --policy.type=act \
+  --batch_size=10 \
+  --steps=300000 \
+  --log_freq=50 \
+  --eval_freq=500 \
+  --save_freq=50000 \
+  --job_name=act_$exp_name \
+  --dataset.repo_id=$exp_name \
+  --dataset.root=data//test_3/$exp_name \
+  --policy.chunk_size=16 \
+  --policy.n_action_steps=16 \
+  --policy.optimizer_lr=1e-4 \
+  --policy.push_to_hub=false \
+  --policy.device=cuda \
+  --wandb.enable=false \
+  --output_dir=outputs/train/act_$exp_name \
+  --dataset.preload=true
+
 # exp_name="multi_object_open_11622_scene_25_seed_25"
 rm -rf outputs/train/act_$exp_name
 CUDA_VISIBLE_DEVICES=2 lerobot-train \
@@ -65,7 +85,7 @@ CUDA_VISIBLE_DEVICES=2 lerobot-train \
   --steps=300000 \
   --log_freq=50 \
   --eval_freq=500 \
-  --save_freq=10000 \
+  --save_freq=50000 \
   --job_name=act_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=data//test_3/$exp_name \
@@ -87,7 +107,7 @@ CUDA_VISIBLE_DEVICES=1 lerobot-train \
   --steps=300000 \
   --log_freq=50 \
   --eval_freq=500 \
-  --save_freq=10000 \
+  --save_freq=50000 \
   --job_name=act_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=data//test_3/$exp_name \

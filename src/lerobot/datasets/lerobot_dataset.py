@@ -573,6 +573,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
         preload: bool = False,
+        requested_keys: set[str] | None = None,
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -707,6 +708,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.batch_encoding_size = batch_encoding_size
         self.episodes_since_last_encoding = 0
         self.vcodec = vcodec
+        self.requested_keys = set(requested_keys) if requested_keys else None
 
         # Unused attributes
         self.image_writer = None
@@ -721,6 +723,20 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.meta = LeRobotDatasetMetadata(
             self.repo_id, self.root, self.revision, force_cache_sync=force_cache_sync
         )
+
+        # Filter requested keys and video/camera keys
+        self._active_video_keys = list(self.meta.video_keys)
+        self._active_camera_keys = list(self.meta.camera_keys)
+        if self.requested_keys is not None:
+            self._active_video_keys = [k for k in self.meta.video_keys if k in self.requested_keys]
+            self._active_camera_keys = [k for k in self.meta.camera_keys if k in self.requested_keys]
+
+            if self.delta_timestamps is not None:
+                self.delta_timestamps = {
+                    k: v for k, v in self.delta_timestamps.items() if k in self.requested_keys
+                }
+                if len(self.delta_timestamps) == 0:
+                    self.delta_timestamps = None
 
         # Track dataset state for efficient incremental writing
         self._lazy_loading = False
@@ -875,10 +891,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
     def get_episodes_file_paths(self) -> list[Path]:
         episodes = self.episodes if self.episodes is not None else list(range(self.meta.total_episodes))
         fpaths = [str(self.meta.get_data_file_path(ep_idx)) for ep_idx in episodes]
-        if len(self.meta.video_keys) > 0:
+        if len(self._active_video_keys) > 0:
             video_files = [
                 str(self.meta.get_video_file_path(ep_idx, vid_key))
-                for vid_key in self.meta.video_keys
+                for vid_key in self._active_video_keys
                 for ep_idx in episodes
             ]
             fpaths += video_files
@@ -891,6 +907,15 @@ class LeRobotDataset(torch.utils.data.Dataset):
         features = get_hf_features_from_features(self.features)
         hf_dataset = load_nested_dataset(self.root / "data", features=features, episodes=self.episodes)
         hf_dataset.set_transform(hf_transform_to_torch)
+        if self.requested_keys is not None:
+            required_columns = set(self.requested_keys)
+            required_columns.update({"episode_index", "task_index"})
+            if len(self._active_video_keys) > 0:
+                required_columns.add("timestamp")
+            available_columns = set(hf_dataset.column_names)
+            select_columns = list(required_columns & available_columns)
+            if select_columns:
+                hf_dataset = hf_dataset.select_columns(select_columns)
         return hf_dataset
 
     def _check_cached_episodes_sufficient(self) -> bool:
@@ -915,9 +940,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
             return False
 
         # Check if all required video files exist
-        if len(self.meta.video_keys) > 0:
+        if len(self._active_video_keys) > 0:
             for ep_idx in requested_episodes:
-                for vid_key in self.meta.video_keys:
+                for vid_key in self._active_video_keys:
                     video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
                     if not video_path.exists():
                         return False
@@ -991,7 +1016,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         query_indices: dict[str, list[int]] | None = None,
     ) -> dict[str, list[float]]:
         query_timestamps = {}
-        for key in self.meta.video_keys:
+        for key in self._active_video_keys:
             if query_indices is not None and key in query_indices:
                 if self._absolute_to_relative_idx is not None:
                     relative_indices = [self._absolute_to_relative_idx[idx] for idx in query_indices[key]]
@@ -1018,7 +1043,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         """
         result: dict = {}
         for key, q_idx in query_indices.items():
-            if key in self.meta.video_keys:
+            if key in self._active_video_keys:
                 continue
             # Map absolute indices to relative indices if needed
             relative_indices = (
@@ -1090,20 +1115,30 @@ class LeRobotDataset(torch.utils.data.Dataset):
             for key, val in query_result.items():
                 item[key] = val
 
-        if len(self.meta.video_keys) > 0:
+        if len(self._active_video_keys) > 0:
             current_ts = item["timestamp"].item()
             query_timestamps = self._get_query_timestamps(current_ts, query_indices)
             video_frames = self._query_videos(query_timestamps, ep_idx)
             item = {**video_frames, **item}
 
         if self.image_transforms is not None:
-            image_keys = self.meta.camera_keys
-            for cam in image_keys:
-                item[cam] = self.image_transforms(item[cam])
+            for cam in self._active_camera_keys:
+                if cam in item:
+                    item[cam] = self.image_transforms(item[cam])
 
         # Add task as a string
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks.iloc[task_idx].name
+
+        if self.requested_keys is not None:
+            allowed_keys = set(self.requested_keys)
+            allowed_keys.update({"task", "episode_index", "frame_index", "timestamp", "task_index"})
+            item = {
+                key: value
+                for key, value in item.items()
+                if key in allowed_keys
+                or (key.endswith("_is_pad") and key.removesuffix("_is_pad") in allowed_keys)
+            }
         return item
 
     # https://github.com/huggingface/lerobot/issues/93， not solving the slow indexing issue yet

@@ -94,6 +94,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         seed: int = 42,
         rng: np.random.Generator | None = None,
         shuffle: bool = True,
+        requested_keys: set[str] | None = None,
     ):
         """Initialize a StreamingLeRobotDataset.
 
@@ -122,6 +123,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         self.episodes = episodes
         self.tolerance_s = tolerance_s
         self.revision = revision if revision else CODEBASE_VERSION
+        self.requested_keys = set(requested_keys) if requested_keys else None
         self.seed = seed
         self.rng = rng if rng is not None else np.random.default_rng(seed)
         self.shuffle = shuffle
@@ -138,6 +140,19 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         self.meta = LeRobotDatasetMetadata(
             self.repo_id, self.root, self.revision, force_cache_sync=force_cache_sync
         )
+
+        self._active_video_keys = list(self.meta.video_keys)
+        self._active_camera_keys = list(self.meta.camera_keys)
+        if self.requested_keys is not None:
+            self._active_video_keys = [k for k in self.meta.video_keys if k in self.requested_keys]
+            self._active_camera_keys = [k for k in self.meta.camera_keys if k in self.requested_keys]
+
+            if self.delta_timestamps is not None:
+                self.delta_timestamps = {
+                    k: v for k, v in self.delta_timestamps.items() if k in self.requested_keys
+                }
+                if len(self.delta_timestamps) == 0:
+                    self.delta_timestamps = None
         # Check version
         check_version_compatibility(self.repo_id, self.meta._version, CODEBASE_VERSION)
 
@@ -265,7 +280,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
                 for key in self.delta_timestamps
             }
         else:
-            return dict.fromkeys(self.meta.video_keys, [start_ts])
+            return dict.fromkeys(self._active_video_keys, [start_ts])
 
     def _make_padding_camera_frame(self, camera_key: str):
         """Variable-shape padding frame for given camera keys, given in (H, W, C)"""
@@ -316,7 +331,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
                 self.meta.episodes[ep_idx][f"videos/{key}/from_timestamp"],
                 self.meta.episodes[ep_idx][f"videos/{key}/to_timestamp"],
             )
-            for key in self.meta.video_keys
+            for key in self._active_video_keys
         }
 
         # Apply delta querying logic if necessary
@@ -326,7 +341,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
             updates.append(padding)
 
         # Load video frames, when needed
-        if len(self.meta.video_keys) > 0:
+        if len(self._active_video_keys) > 0:
             original_timestamps = self._make_timestamps_from_indices(current_ts, self.delta_indices)
 
             # Some timestamps might not result available considering the episode's boundaries
@@ -336,9 +351,9 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
             video_frames = self._query_videos(query_timestamps, ep_idx)
 
             if self.image_transforms is not None:
-                image_keys = self.meta.camera_keys
-                for cam in image_keys:
-                    video_frames[cam] = self.image_transforms(video_frames[cam])
+                for cam in self._active_camera_keys:
+                    if cam in video_frames:
+                        video_frames[cam] = self.image_transforms(video_frames[cam])
 
             updates.append(video_frames)
 
@@ -355,6 +370,16 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
 
         result["task"] = self.meta.tasks.iloc[item["task_index"]].name
 
+        if self.requested_keys is not None:
+            allowed_keys = set(self.requested_keys)
+            allowed_keys.update({"task", "episode_index", "frame_index", "timestamp", "task_index"})
+            result = {
+                key: value
+                for key, value in result.items()
+                if key in allowed_keys
+                or (key.endswith("_is_pad") and key.removesuffix("_is_pad") in allowed_keys)
+            }
+
         yield result
 
     def _get_query_timestamps(
@@ -365,7 +390,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
     ) -> dict[str, list[float]]:
         query_timestamps = {}
         keys_to_timestamps = self._make_timestamps_from_indices(current_ts, query_indices)
-        for key in self.meta.video_keys:
+        for key in self._active_video_keys:
             if query_indices is not None and key in query_indices:
                 timestamps = keys_to_timestamps[key]
                 # Clamp out timesteps outside of episode boundaries
@@ -415,7 +440,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         padding = {}
 
         for key, delta_indices in self.delta_indices.items():
-            if key in self.meta.video_keys:
+            if key in self._active_video_keys:
                 continue  # visual frames are decoded separately
 
             target_frames = []

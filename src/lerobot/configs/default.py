@@ -36,6 +36,8 @@ class DatasetConfig:
     video_backend: str = field(default_factory=get_safe_default_codec)
     streaming: bool = False
     preload: bool = False
+    # Automatically restrict loaded features based on the policy type (e.g., skip images for DP3).
+    filter_features_by_policy: bool = False
 
 
 @dataclass
