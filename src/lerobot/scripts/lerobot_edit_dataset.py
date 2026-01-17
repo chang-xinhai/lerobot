@@ -29,12 +29,12 @@ Delete episodes 0, 2, and 5 from a dataset:
         --operation.type delete_episodes \
         --operation.episode_indices "[0, 2, 5]"
 
-Delete episodes and save to a new dataset:
+Delete episodes safely (ignoring invalid indices):
     python -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id lerobot/pusht \
-        --new_repo_id lerobot/pusht_filtered \
         --operation.type delete_episodes \
-        --operation.episode_indices "[0, 2, 5]"
+        --operation.episode_indices "[0, 99999]" \
+        --operation.ignore_invalid true
 
 Split dataset by fractions:
     python -m lerobot.scripts.lerobot_edit_dataset \
@@ -65,6 +65,13 @@ Remove camera feature:
         --repo_id lerobot/pusht \
         --operation.type remove_feature \
         --operation.feature_names "['observation.images.top']"
+
+Remove feature safely (ignoring missing features):
+    python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id lerobot/pusht \
+        --operation.type remove_feature \
+        --operation.feature_names "['non_existent_feature']" \
+        --operation.ignore_invalid true
 
 Convert image dataset to video format (saves locally):
     python -m lerobot.scripts.lerobot_edit_dataset \
@@ -131,6 +138,7 @@ class DeleteEpisodesConfig:
     type: str = "delete_episodes"
     episode_indices: list[int] | None = None
     backup: bool = True
+    ignore_invalid: bool = False
 
 
 @dataclass
@@ -150,6 +158,7 @@ class RemoveFeatureConfig:
     type: str = "remove_feature"
     feature_names: list[str] | None = None
     backup: bool = True
+    ignore_invalid: bool = False
 
 
 @dataclass
@@ -190,14 +199,11 @@ def get_output_path(repo_id: str, new_repo_id: str | None, root: Path | None) ->
         output_repo_id = repo_id
         dataset_path = root / repo_id if root else HF_LEROBOT_HOME / repo_id
         old_path = Path(str(dataset_path) + "_old")
-
         if dataset_path.exists():
             if old_path.exists():
                 shutil.rmtree(old_path)
             shutil.move(str(dataset_path), str(old_path))
-
         output_dir = dataset_path
-
     return output_repo_id, output_dir
 
 
@@ -209,6 +215,25 @@ def handle_delete_episodes(cfg: EditDatasetConfig) -> None:
         raise ValueError("episode_indices must be specified for delete_episodes operation")
 
     dataset = LeRobotDataset(cfg.repo_id, root=cfg.root)
+    
+    # Handle optional filtering of invalid indices
+    episode_indices = cfg.operation.episode_indices
+    if cfg.operation.ignore_invalid:
+        total_episodes = dataset.meta.total_episodes
+        valid_indices = [i for i in episode_indices if 0 <= i < total_episodes]
+        
+        if len(valid_indices) < len(episode_indices):
+            logging.warning(
+                f"Ignoring {len(episode_indices) - len(valid_indices)} invalid episode indices "
+                f"(out of range 0-{total_episodes-1})."
+            )
+        
+        episode_indices = valid_indices
+        
+        if not episode_indices:
+            logging.warning("No valid episode indices to delete after filtering. Exiting.")
+            return
+
     output_repo_id, output_dir = get_output_path(
         cfg.repo_id, cfg.new_repo_id, Path(cfg.root) if cfg.root else None
     )
@@ -216,10 +241,11 @@ def handle_delete_episodes(cfg: EditDatasetConfig) -> None:
     if cfg.new_repo_id is None:
         dataset.root = Path(str(dataset.root) + "_old")
 
-    logging.info(f"Deleting episodes {cfg.operation.episode_indices} from {cfg.repo_id}")
+    logging.info(f"Deleting episodes {episode_indices} from {cfg.repo_id}")
+
     new_dataset = delete_episodes(
         dataset,
-        episode_indices=cfg.operation.episode_indices,
+        episode_indices=episode_indices,
         output_dir=output_dir,
         repo_id=output_repo_id,
     )
@@ -247,8 +273,8 @@ def handle_split(cfg: EditDatasetConfig) -> None:
         )
 
     dataset = LeRobotDataset(cfg.repo_id, root=cfg.root)
-
     logging.info(f"Splitting dataset {cfg.repo_id} with splits: {cfg.operation.splits}")
+
     split_datasets = split_dataset(dataset, splits=cfg.operation.splits)
 
     for split_name, split_ds in split_datasets.items():
@@ -302,6 +328,25 @@ def handle_remove_feature(cfg: EditDatasetConfig) -> None:
         raise ValueError("feature_names must be specified for remove_feature operation")
 
     dataset = LeRobotDataset(cfg.repo_id, root=cfg.root)
+
+    # Handle optional filtering of invalid features
+    feature_names = cfg.operation.feature_names
+    if cfg.operation.ignore_invalid:
+        existing_features = set(dataset.meta.features.keys())
+        valid_features = [f for f in feature_names if f in existing_features]
+        
+        if len(valid_features) < len(feature_names):
+            logging.warning(
+                f"Ignoring {len(feature_names) - len(valid_features)} invalid features: "
+                f"{set(feature_names) - set(valid_features)}"
+            )
+        
+        feature_names = valid_features
+        
+        if not feature_names:
+            logging.warning("No valid features to remove after filtering. Exiting.")
+            return
+
     output_repo_id, output_dir = get_output_path(
         cfg.repo_id, cfg.new_repo_id, Path(cfg.root) if cfg.root else None
     )
@@ -309,10 +354,11 @@ def handle_remove_feature(cfg: EditDatasetConfig) -> None:
     if cfg.new_repo_id is None:
         dataset.root = Path(str(dataset.root) + "_old")
 
-    logging.info(f"Removing features {cfg.operation.feature_names} from {cfg.repo_id}")
+    logging.info(f"Removing features {feature_names} from {cfg.repo_id}")
+
     new_dataset = remove_feature(
         dataset,
-        feature_names=cfg.operation.feature_names,
+        feature_names=feature_names,
         output_dir=output_dir,
         repo_id=output_repo_id,
     )
@@ -375,7 +421,6 @@ def save_episode_images_for_video(
 
     # Save images with proper naming convention for encode_video_frames (frame-XXXXXX.png)
     items = list(enumerate(episode_dataset))
-
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = [executor.submit(save_single_image, item) for item in items]
         for future in as_completed(futures):
@@ -555,7 +600,6 @@ def convert_dataset_to_videos(
 
     # Process each episode
     all_episode_metadata = []
-
     try:
         for ep_idx in tqdm(episode_indices, desc="Converting episodes to videos"):
             # Get episode metadata from source
@@ -582,7 +626,6 @@ def convert_dataset_to_videos(
                 "dataset_from_index": ep_idx * src_episode["length"],
                 "dataset_to_index": (ep_idx + 1) * src_episode["length"],
             }
-
             # Add video metadata
             for img_key in img_keys:
                 episode_meta.update(video_metadata[img_key])
@@ -626,7 +669,6 @@ def convert_dataset_to_videos(
         if dataset.meta.stats is not None:
             # Remove image stats
             # new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in img_keys}
-            
             # Keep all stats but adjust for key changes if needed
             new_stats = dataset.meta.stats.copy()
             write_stats(new_stats, new_meta.root)
@@ -664,7 +706,6 @@ def _copy_data_without_images(
 
     data_dir = src_dataset.root / DATA_DIR
     parquet_files = sorted(data_dir.glob("*/*.parquet"))
-
     if not parquet_files:
         raise ValueError(f"No parquet files found in {data_dir}")
 
@@ -672,7 +713,6 @@ def _copy_data_without_images(
 
     for src_path in tqdm(parquet_files, desc="Processing data files"):
         df = pd.read_parquet(src_path).reset_index(drop=True)
-        
         # Convert PyArrow extension dtypes to avoid dtype comparison issues
         df = pd.DataFrame(df.to_dict(orient="list"))
 
@@ -708,7 +748,6 @@ def handle_convert_to_video(cfg: EditDatasetConfig) -> None:
     # Determine output directory and repo_id
     # Priority: 1) new_repo_id, 2) operation.output_dir, 3) auto-generated name
     output_dir_config = getattr(cfg.operation, "output_dir", None)
-
     if cfg.new_repo_id:
         # Use new_repo_id for both local storage and hub push
         output_repo_id = cfg.new_repo_id
@@ -727,7 +766,6 @@ def handle_convert_to_video(cfg: EditDatasetConfig) -> None:
         logging.info(f"Saving to auto-generated location: {output_dir}")
 
     logging.info(f"Converting dataset {cfg.repo_id} to video format")
-
     new_dataset = convert_dataset_to_videos(
         dataset=dataset,
         output_dir=output_dir,
@@ -789,7 +827,6 @@ def decode_episode_videos_to_images(
         # Decode all frames from video using pyav backend (fallback for environments without torchcodec)
         tolerance_s = 1.0 / fps  # Tolerance of one frame
         frames = decode_video_frames(video_path, shifted_timestamps, tolerance_s, backend="pyav")
-
         # frames is a tensor of shape (num_frames, C, H, W) with values in [0, 1]
         # Convert to uint8 images
         frames_uint8 = (frames * 255).to(dtype=torch.uint8)
@@ -889,7 +926,6 @@ def convert_dataset_to_images(
 
     # Process each episode
     all_episode_metadata = []
-
     for ep_idx in tqdm(episode_indices, desc="Converting episodes to images"):
         # Get episode metadata from source
         src_episode = dataset.meta.episodes[ep_idx]
@@ -909,7 +945,6 @@ def convert_dataset_to_images(
             "dataset_from_index": src_episode["dataset_from_index"],
             "dataset_to_index": src_episode["dataset_to_index"],
         }
-
         # Add data chunk/file info (using same structure as source)
         if "data/chunk_index" in src_episode:
             episode_meta["data/chunk_index"] = src_episode["data/chunk_index"]
@@ -931,14 +966,12 @@ def convert_dataset_to_images(
     new_meta.info["total_frames"] = sum(ep["length"] for ep in all_episode_metadata)
     new_meta.info["total_tasks"] = dataset.meta.total_tasks
     new_meta.info["splits"] = {"train": f"0:{len(episode_indices)}"}
-
     write_info(new_meta.info, new_meta.root)
 
     # Copy stats and tasks
     if dataset.meta.stats is not None:
         # Remove video stats (if any) - typically stats are only for non-visual features
         # new_stats = {k: v for k, v in dataset.meta.stats.items() if k not in video_keys}
-        
         # Keep all stats but adjust for key changes if needed
         new_stats = dataset.meta.stats.copy()
         write_stats(new_stats, new_meta.root)
@@ -970,12 +1003,10 @@ def _copy_data_with_images(
     import datasets
     import pyarrow.parquet as pq
     from PIL import Image
-
     from lerobot.datasets.utils import DATA_DIR, embed_images, get_hf_features_from_features
 
     data_dir = src_dataset.root / DATA_DIR
     parquet_files = sorted(data_dir.glob("*/*.parquet"))
-
     if not parquet_files:
         raise ValueError(f"No parquet files found in {data_dir}")
 
@@ -983,7 +1014,6 @@ def _copy_data_with_images(
 
     for src_path in tqdm(parquet_files, desc="Processing data files"):
         df = pd.read_parquet(src_path).reset_index(drop=True)
-        
         # Convert PyArrow extension dtypes to avoid dtype comparison issues
         df = pd.DataFrame(df.to_dict(orient="list"))
 
@@ -1037,7 +1067,6 @@ def handle_convert_to_image(cfg: EditDatasetConfig) -> None:
 
     # Determine output directory and repo_id
     output_dir_config = getattr(cfg.operation, "output_dir", None)
-
     if cfg.new_repo_id:
         output_repo_id = cfg.new_repo_id
         output_dir = Path(cfg.root) / cfg.new_repo_id if cfg.root else HF_LEROBOT_HOME / cfg.new_repo_id
@@ -1052,7 +1081,6 @@ def handle_convert_to_image(cfg: EditDatasetConfig) -> None:
         logging.info(f"Saving to auto-generated location: {output_dir}")
 
     logging.info(f"Converting dataset {cfg.repo_id} to image format")
-
     new_dataset = convert_dataset_to_images(
         dataset=dataset,
         output_dir=output_dir,
