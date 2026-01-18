@@ -19,6 +19,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import tqdm
 
@@ -127,8 +128,31 @@ def update_meta_data(
 
     df["meta/episodes/chunk_index"] = df["meta/episodes/chunk_index"] + meta_idx["chunk"]
     df["meta/episodes/file_index"] = df["meta/episodes/file_index"] + meta_idx["file"]
-    df["data/chunk_index"] = df["data/chunk_index"] + data_idx["chunk"]
-    df["data/file_index"] = df["data/file_index"] + data_idx["file"]
+    
+    # Update data chunk/file indices using source-to-destination mapping
+    data_src_to_dst = data_idx.get("src_to_dst", {})
+    if data_src_to_dst:
+        # Store original data file indices before updating
+        df["_orig_data_chunk"] = df["data/chunk_index"].copy()
+        df["_orig_data_file"] = df["data/file_index"].copy()
+        
+        # Map each episode to its correct destination data file
+        for idx in df.index:
+            # Convert to Python int to avoid numpy type mismatch in dict lookup
+            src_key = (int(df.at[idx, "_orig_data_chunk"]), int(df.at[idx, "_orig_data_file"]))
+            
+            # Get destination chunk/file for this source file
+            dst_chunk, dst_file = data_src_to_dst.get(src_key, (data_idx["chunk"], data_idx["file"]))
+            df.at[idx, "data/chunk_index"] = dst_chunk
+            df.at[idx, "data/file_index"] = dst_file
+        
+        # Clean up temporary columns
+        df = df.drop(columns=["_orig_data_chunk", "_orig_data_file"])
+    else:
+        # Fallback to simple offset (for backward compatibility)
+        df["data/chunk_index"] = df["data/chunk_index"] + data_idx["chunk"]
+        df["data/file_index"] = df["data/file_index"] + data_idx["file"]
+    
     for key, video_idx in videos_idx.items():
         # Store original video file indices before updating
         orig_chunk_col = f"videos/{key}/chunk_index"
@@ -394,6 +418,10 @@ def aggregate_data(src_meta, dst_meta, data_idx, data_files_size_in_mb, chunk_si
     Returns:
         dict: Updated data_idx with current chunk and file indices.
     """
+    # Initialize source-to-destination mapping if not present
+    if "src_to_dst" not in data_idx:
+        data_idx["src_to_dst"] = {}
+    
     unique_chunk_file_ids = {
         (c, f)
         for c, f in zip(
@@ -409,6 +437,10 @@ def aggregate_data(src_meta, dst_meta, data_idx, data_files_size_in_mb, chunk_si
         )
         df = pd.read_parquet(src_path)
         df = update_data_df(df, src_meta, dst_meta)
+        
+        # Track destination indices before potentially rotating files
+        pre_chunk = data_idx["chunk"]
+        pre_file = data_idx["file"]
 
         data_idx = append_or_create_parquet_file(
             df,
@@ -420,6 +452,12 @@ def aggregate_data(src_meta, dst_meta, data_idx, data_files_size_in_mb, chunk_si
             contains_images=len(dst_meta.image_keys) > 0,
             aggr_root=dst_meta.root,
         )
+        
+        # Map source file to destination file
+        # Convert to Python int to ensure consistent dict keys
+        src_key = (int(src_chunk_idx), int(src_file_idx))
+        dst_key = (pre_chunk, pre_file)
+        data_idx["src_to_dst"][src_key] = dst_key
 
     return data_idx
 
@@ -507,6 +545,13 @@ def append_or_create_parquet_file(
     Returns:
         dict: Updated index dictionary with current chunk and file indices.
     """
+    def normalize_object_columns(frame: pd.DataFrame) -> pd.DataFrame:
+        """Normalize object columns containing numpy arrays to Python lists."""
+        for col in frame.columns:
+            if frame[col].dtype == "object":
+                frame[col] = frame[col].apply(lambda v: v.tolist() if isinstance(v, np.ndarray) else v)
+        return frame
+
     dst_path = aggr_root / default_path.format(chunk_index=idx["chunk"], file_index=idx["file"])
 
     if not dst_path.exists():
@@ -514,6 +559,9 @@ def append_or_create_parquet_file(
         if contains_images:
             to_parquet_with_hf_images(df, dst_path)
         else:
+            # Convert PyArrow extension dtypes and normalize object columns for Arrow compatibility
+            df = pd.DataFrame(df.to_dict(orient="list"))
+            df = normalize_object_columns(df)
             df.to_parquet(dst_path)
         return idx
 
@@ -528,12 +576,20 @@ def append_or_create_parquet_file(
         target_path = new_path
     else:
         existing_df = pd.read_parquet(dst_path)
+        # Convert potential ExtensionArray / Arrow-backed dtypes to plain Python lists
+        existing_df = pd.DataFrame(existing_df.to_dict(orient="list"))
+        df = pd.DataFrame(df.to_dict(orient="list"))
+        existing_df = normalize_object_columns(existing_df)
+        df = normalize_object_columns(df)
         final_df = pd.concat([existing_df, df], ignore_index=True)
         target_path = dst_path
 
     if contains_images:
         to_parquet_with_hf_images(final_df, target_path)
     else:
+        # Convert PyArrow extension dtypes and normalize object columns for Arrow compatibility
+        final_df = pd.DataFrame(final_df.to_dict(orient="list"))
+        final_df = normalize_object_columns(final_df)
         final_df.to_parquet(target_path)
 
     return idx
