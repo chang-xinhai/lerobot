@@ -909,7 +909,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         hf_dataset.set_transform(hf_transform_to_torch)
         if self.requested_keys is not None:
             required_columns = set(self.requested_keys)
-            required_columns.update({"episode_index", "task_index"})
+            required_columns.update({"episode_index", "task_index", "index", "frame_index"})
             if len(self._active_video_keys) > 0:
                 required_columns.add("timestamp")
             available_columns = set(hf_dataset.column_names)
