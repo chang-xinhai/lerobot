@@ -1537,6 +1537,138 @@ def test_dataset_preload_with_transforms(tmp_path, lerobot_dataset_factory):
             assert item_with_preload["observation.images.laptop"].shape[-2:] == (32, 32)
 
 
+def _get_process_rss_gb() -> float:
+    psutil = pytest.importorskip("psutil")
+    return psutil.Process().memory_info().rss / (1024**3)
+
+
+def _log_dataset_memory_report(label: str, dataset: LeRobotDataset, before_gb: float, after_gb: float) -> None:
+    features = list(dataset.meta.features.keys())
+    report = {
+        "label": label,
+        "repo_id": dataset.repo_id,
+        "root": str(dataset.root),
+        "total_episodes": dataset.meta.total_episodes,
+        "total_frames": dataset.meta.total_frames,
+        "fps": dataset.meta.fps,
+        "requested_keys": sorted(dataset.requested_keys) if dataset.requested_keys else None,
+        "active_video_keys": dataset._active_video_keys,
+        "active_camera_keys": dataset._active_camera_keys,
+        "features": features,
+        "rss_gb_before": round(before_gb, 4),
+        "rss_gb_after": round(after_gb, 4),
+        "rss_gb_delta": round(after_gb - before_gb, 4),
+        "preloaded_items": len(dataset._preloaded_items) if dataset._preloaded_items is not None else 0,
+    }
+    logging.info("Dataset preload memory report: %s", report)
+    print(f"Dataset preload memory report: {report}")
+
+
+@pytest.mark.parametrize(
+    "requested_keys",
+    [
+        {"observation.pointcloud"},
+        {"observation.images.cam0", "observation.images.cam1","observation.cam2"},
+    ],
+)
+def test_dataset_memory(tmp_path, requested_keys):
+    """Profile preload memory for different requested key subsets.
+
+    This test builds a small dataset on disk with both pointcloud and image features,
+    then measures process RSS before and after preloading with `requested_keys`.
+    """
+    # Build a small dataset with both pointcloud and image features
+    repo_id = "lerobot/test_memory"
+    root = tmp_path / "memory_dataset"
+    features = {
+        "observation.pointcloud": {
+            "dtype": "float32",
+            "shape": (4096, 6),
+            "names": ["points", "xyzrgb"],
+        },
+        "observation.images.cam0": {
+            "dtype": "video",
+            "shape": (3, 240, 320),
+            "names": ["channels", "height", "width"],
+        },
+        "observation.images.cam1": {
+            "dtype": "video",
+            "shape": (3, 240, 320),
+            "names": ["channels", "height", "width"],
+        },
+        "observation.images.cam2": {
+            "dtype": "video",
+            "shape": (3, 240, 320),
+            "names": ["channels", "height", "width"],
+        },
+        "action": {
+            "dtype": "float32",
+            "shape": (12,),
+            "names": [
+                "base_x",
+                "base_y",
+                "base_z",
+                "panda_joint1",
+                "panda_joint2",
+                "panda_joint3",
+                "panda_joint4",
+                "panda_joint5",
+                "panda_joint6",
+                "panda_joint7",
+                "panda_finger_joint1",
+                "panda_finger_joint2",
+            ],
+        },
+    }
+
+    dataset_writer = LeRobotDataset.create(
+        repo_id=repo_id,
+        fps=15,
+        features=features,
+        root=root,
+        use_videos=True,
+    )
+
+    num_episodes = 2
+    frames_per_episode = 4
+    rng = np.random.default_rng(0)
+    for ep_idx in range(num_episodes):
+        for _ in range(frames_per_episode):
+            frame = {
+                "observation.pointcloud": rng.standard_normal((4096, 6)).astype(np.float32),
+                "observation.images.cam0": rng.random((3, 240, 320)).astype(np.float32),
+                "observation.images.cam1": rng.random((3, 240, 320)).astype(np.float32),
+                "observation.images.cam2": rng.random((3, 240, 320)).astype(np.float32),
+                "action": rng.standard_normal((12,)).astype(np.float32),
+                "task": f"task_{ep_idx}",
+            }
+            dataset_writer.add_frame(frame)
+        dataset_writer.save_episode()
+    dataset_writer.finalize()
+
+    before_gb = _get_process_rss_gb()
+    dataset = LeRobotDataset(
+        repo_id=repo_id,
+        root=root,
+        preload=True,
+        requested_keys=requested_keys,
+        download_videos=False,
+    )
+    after_gb = _get_process_rss_gb()
+
+    _log_dataset_memory_report(
+        label=f"requested_keys={sorted(requested_keys)}",
+        dataset=dataset,
+        before_gb=before_gb,
+        after_gb=after_gb,
+    )
+
+    # Sanity checks: preload should be done and items should be available
+    assert dataset.preload is True
+    assert dataset._preloaded_items is not None
+    assert len(dataset._preloaded_items) == len(dataset)
+
+
 def test_delta_timestamps_with_episodes_filter(tmp_path, empty_lerobot_dataset_factory):
     """Regression test for bug where delta_timestamps incorrectly marked all frames as padded when using episodes filter.
 

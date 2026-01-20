@@ -95,6 +95,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         rng: np.random.Generator | None = None,
         shuffle: bool = True,
         requested_keys: set[str] | None = None,
+        video_decode_dtype: str = "uint8",
     ):
         """Initialize a StreamingLeRobotDataset.
 
@@ -124,6 +125,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
         self.tolerance_s = tolerance_s
         self.revision = revision if revision else CODEBASE_VERSION
         self.requested_keys = set(requested_keys) if requested_keys else None
+        self.video_decode_dtype = video_decode_dtype
         self.seed = seed
         self.rng = rng if rng is not None else np.random.default_rng(seed)
         self.shuffle = shuffle
@@ -415,7 +417,11 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
             root = self.meta.url_root if self.streaming and not self.streaming_from_local else self.root
             video_path = f"{root}/{self.meta.get_video_file_path(ep_idx, video_key)}"
             frames = decode_video_frames_torchcodec(
-                video_path, query_ts, self.tolerance_s, decoder_cache=self.video_decoder_cache
+                video_path,
+                query_ts,
+                self.tolerance_s,
+                decoder_cache=self.video_decoder_cache,
+                output_dtype=self.video_decode_dtype,
             )
 
             item[video_key] = frames.squeeze(0) if len(query_ts) == 1 else frames

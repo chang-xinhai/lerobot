@@ -257,6 +257,8 @@ class _NormalizationMixin:
             if feature.type != FeatureType.ACTION and key in new_observation:
                 # Convert to tensor but preserve original dtype for adaptation logic
                 tensor = torch.as_tensor(new_observation[key])
+                if feature.type == FeatureType.VISUAL and tensor.dtype == torch.uint8:
+                    tensor = tensor.to(torch.float32) / 255.0
                 new_observation[key] = self._apply_transform(tensor, key, feature.type, inverse=inverse)
         return new_observation
 

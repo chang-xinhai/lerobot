@@ -574,6 +574,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         vcodec: str = "libsvtav1",
         preload: bool = False,
         requested_keys: set[str] | None = None,
+        video_decode_dtype: str = "uint8",
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -704,6 +705,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.tolerance_s = tolerance_s
         self.revision = revision if revision else CODEBASE_VERSION
         self.video_backend = video_backend if video_backend else get_safe_default_codec()
+        self.video_decode_dtype = video_decode_dtype
         self.delta_indices = None
         self.batch_encoding_size = batch_encoding_size
         self.episodes_since_last_encoding = 0
@@ -1086,7 +1088,13 @@ class LeRobotDataset(torch.utils.data.Dataset):
             shifted_query_ts = [from_timestamp + ts for ts in query_ts]
 
             video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
-            frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)
+            frames = decode_video_frames(
+                video_path,
+                shifted_query_ts,
+                self.tolerance_s,
+                self.video_backend,
+                output_dtype=self.video_decode_dtype,
+            )
             item[vid_key] = frames.squeeze(0)
 
         return item
@@ -1654,6 +1662,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         video_backend: str | None = None,
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
+        video_decode_dtype: str = "uint8",
     ) -> "LeRobotDataset":
         """Create a LeRobot Dataset from scratch in order to record data."""
         if vcodec not in VALID_VIDEO_CODECS:
@@ -1689,6 +1698,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj.delta_indices = None
         obj._absolute_to_relative_idx = None
         obj.video_backend = video_backend if video_backend is not None else get_safe_default_codec()
+        obj.video_decode_dtype = video_decode_dtype
         obj.writer = None
         obj.latest_episode = None
         obj._current_file_start_frame = None

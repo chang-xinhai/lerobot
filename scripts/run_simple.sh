@@ -176,11 +176,11 @@ lerobot-train \
 
 
 # Convert data
-rm -rf /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test_image
+rm -rf /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_image
 python -m lerobot.scripts.lerobot_edit_dataset \
-      --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
+      --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0 \
       --operation.type convert_to_image \
-      --operation.output_dir /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test_image
+      --operation.output_dir /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_image
 
 python -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id /home/xinhai/projects/automoma/third_party/lerobot/data/multi_object_open_7221_scene_0_seed_0_test \
@@ -219,3 +219,10 @@ python -m lerobot.scripts.lerobot_edit_dataset \
         --operation.splits '{"test": [0, 1, 2]}'
 
 # MultiLeRobotDataset
+
+exp_name="multi_object_open_7221_scene_0_seed_0"
+dataset_root="$(pwd)/data/lerobot/$exp_name"
+python -m lerobot.scripts.lerobot_edit_dataset \
+        --repo_id $dataset_root \
+        --operation.type split \
+        --operation.splits '{"test": [0, 1, 2]}'

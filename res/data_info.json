@@ -36,23 +36,6 @@
                 ]
             ]
         },
-        "observation.eef": {
-            "dtype": "float32",
-            "shape": [
-                7
-            ],
-            "names": [
-                [
-                    "x",
-                    "y",
-                    "z",
-                    "qx",
-                    "qy",
-                    "qz",
-                    "qw"
-                ]
-            ]
-        },
         "action": {
             "dtype": "float32",
             "shape": [
@@ -143,45 +126,6 @@
                 "video.channels": 3,
                 "has_audio": false
             }
-        },
-        "observation.depth.ego_topdown": {
-            "dtype": "float32",
-            "shape": [
-                1,
-                240,
-                320
-            ],
-            "names": [
-                "channels",
-                "height",
-                "width"
-            ]
-        },
-        "observation.depth.ego_wrist": {
-            "dtype": "float32",
-            "shape": [
-                1,
-                240,
-                320
-            ],
-            "names": [
-                "channels",
-                "height",
-                "width"
-            ]
-        },
-        "observation.depth.fix_local": {
-            "dtype": "float32",
-            "shape": [
-                1,
-                240,
-                320
-            ],
-            "names": [
-                "channels",
-                "height",
-                "width"
-            ]
         },
         "observation.pointcloud": {
             "dtype": "float32",

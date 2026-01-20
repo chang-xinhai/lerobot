@@ -188,6 +188,7 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
                 tolerance_s=cfg.tolerance_s,
                 preload=cfg.dataset.preload,
                 requested_keys=required_keys,
+                video_decode_dtype=cfg.dataset.video_decode_dtype,
             )
         else:
             dataset = StreamingLeRobotDataset(
@@ -200,6 +201,7 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
                 max_num_shards=cfg.num_workers,
                 tolerance_s=cfg.tolerance_s,
                 requested_keys=required_keys,
+                video_decode_dtype=cfg.dataset.video_decode_dtype,
             )
     else:
         raise NotImplementedError("The MultiLeRobotDataset isn't supported for now.")

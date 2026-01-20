@@ -34,6 +34,8 @@ class DatasetConfig:
     revision: str | None = None
     use_imagenet_stats: bool = True
     video_backend: str = field(default_factory=get_safe_default_codec)
+    # Output dtype for decoded video frames: uint8|float16|float32
+    video_decode_dtype: str = "uint8"
     streaming: bool = False
     preload: bool = False
     # Automatically restrict loaded features based on the policy type (e.g., skip images for DP3).
