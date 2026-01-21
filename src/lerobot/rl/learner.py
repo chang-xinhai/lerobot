@@ -589,7 +589,8 @@ def add_actor_information_and_train(
             logging.info(f"[LEARNER] Number of optimization step: {optimization_step}")
 
         # Save checkpoint at specified intervals
-        if saving_checkpoint and (optimization_step % save_freq == 0 or optimization_step == online_steps):
+        # Guard against save_freq == 0: treat 0 as "no periodic saves" and only save at the final step
+        if saving_checkpoint and ((save_freq != 0 and optimization_step % save_freq == 0) or optimization_step == online_steps):
             save_training_checkpoint(
                 cfg=cfg,
                 optimization_step=optimization_step,
