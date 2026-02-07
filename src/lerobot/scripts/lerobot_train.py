@@ -17,6 +17,7 @@ import dataclasses
 import logging
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
@@ -30,6 +31,7 @@ from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
+from lerobot.datasets.utils import INFO_PATH
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
@@ -52,6 +54,16 @@ from lerobot.utils.utils import (
     has_method,
     init_logging,
 )
+from lerobot.utils.constants import HF_LEROBOT_HOME
+
+
+def _is_dataset_cached(cfg: TrainPipelineConfig) -> bool:
+    if not isinstance(cfg.dataset.repo_id, str):
+        return False
+    if cfg.dataset.streaming:
+        return False
+    root = Path(cfg.dataset.root) if cfg.dataset.root else HF_LEROBOT_HOME / cfg.dataset.repo_id
+    return (root / INFO_PATH).exists()
 
 
 def update_policy(
@@ -212,15 +224,21 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     # Dataset loading synchronization: main process downloads first to avoid race conditions
-    if is_main_process:
-        logging.info("Creating dataset")
+    parallel_dataset_init = accelerator.num_processes > 1 and _is_dataset_cached(cfg)
+    if parallel_dataset_init:
+        logging.info("Creating dataset in parallel")
         dataset = make_dataset(cfg)
+        accelerator.wait_for_everyone()
+    else:
+        if is_main_process:
+            logging.info("Creating dataset")
+            dataset = make_dataset(cfg)
 
-    accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
 
-    # Now all other processes can safely load the dataset
-    if not is_main_process:
-        dataset = make_dataset(cfg)
+        # Now all other processes can safely load the dataset
+        if not is_main_process:
+            dataset = make_dataset(cfg)
     
     # Enable torch format for datasets to return torch tensors directly
     # Issue: "https://github.com/huggingface/lerobot/issues/1282", changing "datasets>=2.19.0", to "datasets>=2.19.0,<4.0.0", in pyproject.toml
