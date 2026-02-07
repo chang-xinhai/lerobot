@@ -22,6 +22,7 @@ venv.bak/
 .python-version
 __pypackages__/
 node_modules/
+viz_results/
 
 # Lock files
 poetry.lock

@@ -77,13 +77,18 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.utils.constants import ACTION, DONE, OBS_STATE, OBS_EEF, OBS_POINTCLOUD, REWARD
 
 
-def to_hwc_uint8_numpy(chw_float32_torch: torch.Tensor) -> np.ndarray:
-    assert chw_float32_torch.dtype == torch.float32
-    assert chw_float32_torch.ndim == 3
-    c, h, w = chw_float32_torch.shape
-    assert c < h and c < w, f"expect channel first images, but instead {chw_float32_torch.shape}"
-    hwc_uint8_numpy = (chw_float32_torch * 255).type(torch.uint8).permute(1, 2, 0).numpy()
-    return hwc_uint8_numpy
+def to_hwc_uint8_numpy(chw_torch: torch.Tensor) -> np.ndarray:
+    assert chw_torch.ndim == 3
+    c, h, w = chw_torch.shape
+    assert c < h and c < w, f"expect channel first images, but instead {chw_torch.shape}"
+
+    if chw_torch.dtype == torch.uint8:
+        return chw_torch.permute(1, 2, 0).numpy()
+
+    if chw_torch.dtype == torch.float32:
+        return (chw_torch * 255).clamp(0, 255).type(torch.uint8).permute(1, 2, 0).numpy()
+
+    return chw_torch.float().mul(255).clamp(0, 255).type(torch.uint8).permute(1, 2, 0).numpy()
 
 
 def visualize_dataset(
