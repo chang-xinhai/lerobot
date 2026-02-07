@@ -38,6 +38,7 @@ class DatasetConfig:
     video_decode_dtype: str = "uint8"
     streaming: bool = False
     preload: bool = False
+    preload_cache: bool = False
     # Automatically restrict loaded features based on the policy type (e.g., skip images for DP3).
     filter_features_by_policy: bool = False
 

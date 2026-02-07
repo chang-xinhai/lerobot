@@ -41,16 +41,16 @@ lerobot-train \
   --dataset.filter_features_by_policy=true
 
 # DP for train
-exp_name="multi_object_open_7221_scene_0_seed_0"
+exp_name="test_lerobot"
 dataset_root=data/lerobot/$exp_name
 rm -rf outputs/train/dp_$exp_name
-lerobot-train \
+CUDA_VISIBLE_DEVICES=1 lerobot-train \
   --policy.type=diffusion \
   --batch_size=512 \
-  --steps=1000000 \
+  --steps=1000 \
   --log_freq=50 \
   --eval_freq=1000 \
-  --save_freq=100000 \
+  --save_freq=100 \
   --job_name=dp_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=$dataset_root \
@@ -59,7 +59,9 @@ lerobot-train \
   --policy.device=cuda \
   --wandb.enable=false \
   --dataset.preload=true \
-  --dataset.filter_features_by_policy=true
+  --dataset.preload_cache=true \
+  --dataset.filter_features_by_policy=true \
+  --num_workers=4
 
 # ACT for debug
 exp_name="test_lerobot"
@@ -83,7 +85,7 @@ CUDA_VISIBLE_DEVICES=1  lerobot-train \
   --wandb.enable=false \
   --output_dir=outputs/train/act_$exp_name \
   --dataset.preload=true \
-  --dataset.filter_features_by_policy=true
+  --dataset.filter_features_by_policy=true 
 
 # DP3 for debug
 dataset_root=data/lerobot/$exp_name
@@ -128,6 +130,39 @@ lerobot-train \
     --batch_size=32 \
     --dataset.preload=true \
     --dataset.filter_features_by_policy=true
+
+# Debug for multigpu
+
+exp_name="test_lerobot"
+dataset_root=data/lerobot/$exp_name
+rm -rf outputs/train/act_$exp_name
+accelerate launch \
+  --multi_gpu \
+  --num_processes=4 \
+  $(which lerobot-train) \
+  --policy.type=act \
+  --batch_size=128 \
+  --steps=1000 \
+  --log_freq=50 \
+  --eval_freq=500 \
+  --save_freq=100 \
+  --job_name=act_$exp_name \
+  --dataset.repo_id=$exp_name \
+  --dataset.root=$dataset_root \
+  --policy.chunk_size=16 \
+  --policy.n_action_steps=16 \
+  --policy.optimizer_lr=1e-4 \
+  --policy.push_to_hub=false \
+  --policy.device=cuda \
+  --wandb.enable=false \
+  --output_dir=outputs/train/act_$exp_name \
+  --dataset.preload=false \
+  --dataset.filter_features_by_policy=true \
+  --num_workers=8
+
+
+
+
 
 
 ###############################################################

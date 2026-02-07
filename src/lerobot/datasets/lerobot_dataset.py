@@ -15,7 +15,10 @@
 # limitations under the License.
 import concurrent.futures
 import contextlib
+import hashlib
+import json
 import logging
+import os
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -576,6 +579,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
         preload: bool = False,
+        preload_cache: bool = False,
         requested_keys: set[str] | None = None,
         video_decode_dtype: str = "uint8",
     ):
@@ -714,6 +718,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.episodes_since_last_encoding = 0
         self.vcodec = vcodec
         self.requested_keys = set(requested_keys) if requested_keys else None
+        self.preload_cache = preload_cache
 
         # Unused attributes
         self.image_writer = None
@@ -781,22 +786,150 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self._preloaded_items: list[dict] | None = None
         self._preloading = False
         if self.preload:
-            self._preloading = True
-            logging.info(f"Preloading {len(self)} items into memory...")
-            self._preloaded_items = []
-            from tqdm.auto import tqdm
-            for idx in tqdm(range(len(self)), desc=f"Preloading {self.repo_id}", unit="item"):
-                # Call the original __getitem__ logic to compute each item
-                item = self._compute_item(idx)
-                self._preloaded_items.append(item)
-            # Drop the raw HF dataset to free memory once preloading is done.
-            # The preloaded items are sufficient for __getitem__ when preload=True.
+            if not self._load_preload_cache():
+                self._pre_load_dataset()
+
+    def _preload_cache_key(self) -> str:
+        payload = {
+            "repo_id": self.repo_id,
+            "revision": self.revision,
+            "root": str(self.root),
+            "episodes": self.episodes,
+            "requested_keys": sorted(self.requested_keys) if self.requested_keys else None,
+            "delta_timestamps": self.delta_timestamps,
+            "video_backend": self.video_backend,
+            "video_decode_dtype": self.video_decode_dtype,
+            "tolerance_s": self.tolerance_s,
+            "total_frames": self.meta.total_frames,
+            "codebase_version": CODEBASE_VERSION,
+        }
+        print(f"Preload cache key payload:")
+        print(payload)
+        
+        raw = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()[:16]
+
+    def _preload_cache_path(self) -> Path:
+        cache_dir = self.root / ".preload_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / f"preload_{self._preload_cache_key()}.pt"
+
+    def _load_preload_cache(self) -> bool:
+        if not self.preload_cache:
+            return False
+        cache_path = self._preload_cache_path()
+        if not cache_path.exists():
+            return False
+        try:
+            payload = torch.load(cache_path, map_location="cpu")
+            if payload.get("cache_key") != self._preload_cache_key():
+                return False
+            self._preloaded_items = payload.get("items")
+            if self._preloaded_items is None:
+                return False
             self.hf_dataset = None
             self._lazy_loading = False
             self._writer_closed_for_reading = False
-            self._preloading = False
-            logging.info("Preloading complete.")
+            logging.info("Loaded preload cache from %s", cache_path)
+            return True
+        except Exception as exc:
+            logging.warning("Failed to load preload cache at %s: %s", cache_path, exc)
+            return False
 
+    def _save_preload_cache(self) -> None:
+        if not self.preload_cache:
+            return
+        cache_path = self._preload_cache_path()
+        payload = {
+            "cache_key": self._preload_cache_key(),
+            "items": self._preloaded_items,
+        }
+        try:
+            torch.save(payload, cache_path)
+            logging.info("Saved preload cache to %s", cache_path)
+        except Exception as exc:
+            logging.warning("Failed to save preload cache at %s: %s", cache_path, exc)
+
+    def _pre_load_dataset(self, mode="parallel", num_workers=None) -> None:
+        """
+        Preload the dataset items if preload=True.
+        
+        Args:
+            mode (str): 'serial' for original sequential loading, 'parallel' for multi-threaded loading.
+            num_workers (int, optional): Number of workers for parallel loading. Defaults to CPU count if None.
+        """
+        self._preloading = True
+        
+        # Pre-allocate list with None to allow index-based assignment in parallel mode
+        # This is faster and safer than appending in threads
+        self._preloaded_items = [None] * len(self)
+        
+        # Ensure the underlying HF dataset is loaded before we start threading
+        self._ensure_hf_dataset_loaded()
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from tqdm.auto import tqdm
+        import os
+        
+        if mode == "parallel":
+            if len(self._active_video_keys) > 0:
+                logging.warning(
+                    "Parallel preloading is disabled for video datasets to avoid thread-unsafe decoding. "
+                    "Falling back to serial mode."
+                )
+                mode = "serial"
+
+        if mode == "parallel":
+            if num_workers is None:
+                num_workers = min(32, os.cpu_count() or 1)
+            num_workers = max(1, int(num_workers))
+
+            logging.info(
+                "Preloading %s items into memory (Parallel, workers=%s)...",
+                len(self),
+                num_workers,
+            )
+
+            def _load_one(idx: int) -> tuple[int, dict]:
+                return idx, self._compute_item(idx)
+
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = [executor.submit(_load_one, idx) for idx in range(len(self))]
+                with tqdm(
+                    total=len(futures),
+                    desc=f"Preloading {self.repo_id} (Parallel)",
+                    unit="item",
+                ) as pbar:
+                    try:
+                        for future in as_completed(futures):
+                            idx, item = future.result()
+                            self._preloaded_items[idx] = item
+                            pbar.update(1)
+                    except Exception:
+                        for fut in futures:
+                            fut.cancel()
+                        raise
+
+        elif mode == "serial":
+            logging.info(f"Preloading {len(self)} items into memory (Serial)...")
+            
+            for idx in tqdm(range(len(self)), desc=f"Preloading {self.repo_id} (Serial)", unit="item"):
+                # Call the original __getitem__ logic to compute each item
+                item = self._compute_item(idx)
+                self._preloaded_items[idx] = item
+        else:
+            raise ValueError(f"Invalid preloading mode '{mode}'. Must be 'serial' or 'parallel'.")
+
+        # Common cleanup for both modes
+        # Drop the raw HF dataset to free memory once preloading is done.
+        # The preloaded items are sufficient for __getitem__ when preload=True.
+        self.hf_dataset = None
+        self._lazy_loading = False
+        self._writer_closed_for_reading = False
+        self._preloading = False
+        logging.info("Preloading complete.")
+        self._save_preload_cache()
+        
     def _close_writer(self) -> None:
         """Close and cleanup the parquet writer if it exists."""
         writer = getattr(self, "writer", None)
