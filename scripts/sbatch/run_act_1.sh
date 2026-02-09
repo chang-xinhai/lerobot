@@ -18,10 +18,10 @@ rm -rf outputs/train/act_$exp_name
 lerobot-train \
   --policy.type=act \
   --batch_size=512 \
-  --steps=1000000 \
+  --steps=100 \
   --log_freq=50 \
-  --eval_freq=1000 \
-  --save_freq=100000 \
+  --eval_freq=500 \
+  --save_freq=100 \
   --job_name=act_$exp_name \
   --dataset.repo_id=$exp_name \
   --dataset.root=$dataset_root \
@@ -33,4 +33,5 @@ lerobot-train \
   --wandb.enable=true \
   --output_dir=outputs/train/act_$exp_name \
   --dataset.preload=true \
+  --dataset.preload_cache=true \
   --dataset.filter_features_by_policy=true

@@ -85,6 +85,7 @@ CUDA_VISIBLE_DEVICES=1  lerobot-train \
   --wandb.enable=false \
   --output_dir=outputs/train/act_$exp_name \
   --dataset.preload=true \
+  --dataset.preload_cache=true \
   --dataset.filter_features_by_policy=true 
 
 # DP3 for debug

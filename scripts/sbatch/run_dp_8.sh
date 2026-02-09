@@ -21,7 +21,6 @@ rm -rf outputs/train/dp_$exp_name
 accelerate launch \
   --multi_gpu \
   --num_processes=8 \
-  --mixed_precision=fp16 \
   $(which lerobot-train) \
   --policy.type=diffusion \
   --batch_size=512 \
@@ -37,4 +36,5 @@ accelerate launch \
   --policy.device=cuda \
   --wandb.enable=true \
   --dataset.preload=true \
+  --dataset.preload_cache=true \
   --dataset.filter_features_by_policy=true
