@@ -18,9 +18,9 @@ from dataclasses import dataclass
 import torch
 
 from lerobot.configs.types import FeatureType, PipelineFeatureType, PolicyFeature
-from lerobot.utils.constants import OBS_IMAGES, OBS_PREFIX, OBS_STATE, OBS_STR
+from lerobot.utils.constants import ACTION, OBS_IMAGES, OBS_PREFIX, OBS_STATE, OBS_STR
 
-from .pipeline import ObservationProcessorStep, ProcessorStepRegistry
+from .pipeline import ActionProcessorStep, ObservationProcessorStep, ProcessorStepRegistry
 
 
 @dataclass
@@ -215,6 +215,13 @@ class IsaaclabArenaProcessorStep(ObservationProcessorStep):
                 state = torch.cat(state_components, dim=-1)
                 state = state.float()
                 processed_obs[OBS_STATE] = state
+
+                # Add dummy img_state_delta (required by some policies trained on
+                # converted datasets where this feature is always zero)
+                batch_size = state.shape[0]
+                processed_obs["observation.img_state_delta"] = torch.zeros(
+                    batch_size, 1, dtype=torch.float32, device=state.device
+                )
 
         return processed_obs
 

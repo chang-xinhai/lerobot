@@ -1,3 +1,152 @@
+#################################################################################
+# IsaacLab-Arena HDF5 to LeRobot Dataset 
+#################################################################################
+
+# Arena-G1-Loco-Manipulation-Task
+python isaaclab_arena_gr00t/data_utils/convert_hdf5_to_lerobot.py \
+  --yaml_file isaaclab_arena_gr00t/config/g1_locomanip_config.yaml
+
+python -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
+    --repo-id=/home/xinhai/projects/lerobot-arena/IsaacLab-Arena/data/nvidia/Arena-G1-Loco-Manipulation-Task/arena_g1_loco_manipulation_dataset_generated_small/lerobot
+
+exp_name="Arena-G1-Loco-Manipulation-Task"
+dataset_root=data/lerobot/$exp_name
+rm -rf outputs/train/dp_$exp_name
+lerobot-train \
+  --policy.type=diffusion \
+  --batch_size=32 \
+  --steps=100 \
+  --log_freq=5 \
+  --eval_freq=50 \
+  --save_freq=100 \
+  --job_name=dp_$exp_name \
+  --dataset.repo_id=$exp_name \
+  --dataset.root=$dataset_root \
+  --policy.push_to_hub=false \
+  --output_dir=outputs/train/dp_$exp_name \
+  --policy.device=cuda \
+  --wandb.enable=true 
+
+# Evaluation
+
+lerobot-eval \
+    --policy.path=nvidia/smolvla-arena-gr1-microwave \
+    --env.type=isaaclab_arena \
+    --env.hub_path=nvidia/isaaclab-arena-envs \
+    --rename_map='{"observation.images.robot_pov_cam_rgb": "observation.images.robot_pov_cam"}' \
+    --policy.device=cuda \
+    --env.environment=gr1_microwave \
+    --env.embodiment=gr1_pink \
+    --env.object=mustard_bottle \
+    --env.headless=false \
+    --env.enable_cameras=true \
+    --env.video=true \
+    --env.video_length=10 \
+    --env.video_interval=15 \
+    --env.state_keys=robot_joint_pos \
+    --env.camera_keys=robot_pov_cam_rgb \
+    --trust_remote_code=True \
+    --eval.batch_size=1
+
+lerobot-eval \
+    --policy.path=outputs/train/act_Arena-GR1-Manipulation-Task-v3/checkpoints/005000/pretrained_model \
+    --env.type=isaaclab_arena \
+    --env.hub_path=nvidia/isaaclab-arena-envs \
+    --rename_map='{"observation.images.robot_pov_cam_rgb": "observation.images.robot_pov_cam"}' \
+    --policy.device=cuda \
+    --env.environment=gr1_microwave \
+    --env.embodiment=gr1_pink \
+    --env.object=mustard_bottle \
+    --env.headless=false \
+    --env.enable_cameras=true \
+    --env.video=true \
+    --env.video_length=10 \
+    --env.video_interval=15 \
+    --env.state_keys=robot_joint_pos \
+    --env.camera_keys=robot_pov_cam_rgb \
+    --trust_remote_code=True \
+    --eval.batch_size=1 
+
+lerobot-eval \
+    --policy.path=outputs/train/dp_Arena-G1-Loco-Manipulation-Task/checkpoints/000100/pretrained_model \
+    --env.type=isaaclab_arena \
+    --env.hub_path=nvidia/isaaclab-arena-envs \
+    --rename_map='{"observation.images.robot_pov_cam_rgb": "observation.images.robot_pov_cam"}' \
+    --policy.device=cuda \
+    --env.environment=g1_locomanip_pnp \
+    --env.embodiment=g1_wbc_pink \
+    --env.object=brown_box \
+    --env.headless=false \
+    --env.enable_cameras=true \
+    --env.video=true \
+    --env.video_length=10 \
+    --env.video_interval=15 \
+    --env.state_keys=robot_joint_pos \
+    --env.camera_keys=robot_pov_cam_rgb \
+    --trust_remote_code=True \
+    --eval.batch_size=1 
+    
+lerobot-eval \
+    --policy.path=outputs/train/dp_Arena-GR1-Manipulation-Task-v3/checkpoints/005000/pretrained_model \
+    --env.type=isaaclab_arena \
+    --env.hub_path=nvidia/isaaclab-arena-envs \
+    --rename_map='{"observation.images.robot_pov_cam_rgb": "observation.images.robot_pov_cam"}' \
+    --policy.device=cuda \
+    --env.environment=gr1_microwave \
+    --env.embodiment=gr1_pink \
+    --env.object=mustard_bottle \
+    --env.headless=false \
+    --env.enable_cameras=true \
+    --env.video=true \
+    --env.video_length=10 \
+    --env.video_interval=15 \
+    --env.state_keys=robot_joint_pos \
+    --env.camera_keys=robot_pov_cam_rgb \
+    --trust_remote_code=True \
+    --eval.batch_size=1
+
+TORCH_COMPILE_DISABLE=1 TORCHINDUCTOR_DISABLE=1 lerobot-eval \
+    --policy.path=nvidia/pi05-arena-gr1-microwave \
+    --env.type=isaaclab_arena \
+    --env.hub_path=nvidia/isaaclab-arena-envs \
+    --rename_map='{"observation.images.robot_pov_cam_rgb": "observation.images.robot_pov_cam"}' \
+    --policy.device=cuda \
+    --env.environment=gr1_microwave \
+    --env.embodiment=gr1_pink \
+    --env.object=mustard_bottle \
+    --env.headless=false \
+    --env.enable_cameras=true \
+    --env.video=true \
+    --env.video_length=15 \
+    --env.video_interval=15 \
+    --env.state_keys=robot_joint_pos \
+    --env.camera_keys=robot_pov_cam_rgb \
+    --trust_remote_code=True \
+    --eval.batch_size=1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ################################################################################
 # AutoMoMa HDF5 to LeRobot Dataset 
 #################################################################################

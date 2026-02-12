@@ -262,8 +262,13 @@ def _download_hub_file(
     hub_cache_dir: str | None,
 ) -> tuple[str, str, str, str]:
     """
-    Parse `cfg_str` (hub URL), enforce `trust_remote_code`, and return
+    Parse `cfg_str` (hub URL or local path), enforce `trust_remote_code`, and return
     (repo_id, file_path, local_file, revision).
+
+    Supports both HuggingFace Hub repo IDs (e.g., ``nvidia/isaaclab-arena-envs``)
+    and local filesystem paths (e.g., ``/path/to/isaaclab-arena-envs``).
+    When a local directory is provided, ``env.py`` (or the file specified after
+    ``:``) is loaded directly without any Hub download.
     """
     if not trust_remote_code:
         raise RuntimeError(
@@ -275,6 +280,24 @@ def _download_hub_file(
 
     repo_id, revision, file_path = _parse_hub_url(cfg_str)
 
+    # ── Local path support ──────────────────────────────────────────────
+    # If hub_path points to a local directory, resolve the file directly
+    # instead of downloading from the Hub.
+    local_dir = os.path.expanduser(cfg_str.split(":", 1)[0].split("@", 1)[0])
+    if os.path.isdir(local_dir):
+        # Re-parse: the part before any ':' is the directory, after ':' is the file
+        if ":" in cfg_str:
+            _, file_path = cfg_str.split(":", 1)
+        else:
+            file_path = "env.py"
+        local_file = os.path.join(local_dir, file_path)
+        if not os.path.exists(local_file):
+            raise FileNotFoundError(
+                f"Could not find '{file_path}' in local directory '{local_dir}'"
+            )
+        return local_dir, file_path, local_file, None
+
+    # ── Hub download ────────────────────────────────────────────────────
     try:
         local_file = hf_hub_download(
             repo_id=repo_id, filename=file_path, revision=revision, cache_dir=hub_cache_dir
