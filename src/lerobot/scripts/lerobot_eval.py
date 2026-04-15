@@ -47,6 +47,7 @@ You can learn about the CLI options for this script in the `EvalPipelineConfig` 
 """
 
 import concurrent.futures as cf
+import csv
 import json
 import logging
 import threading
@@ -90,6 +91,31 @@ from lerobot.utils.utils import (
     init_logging,
     inside_slurm,
 )
+
+
+PER_EPISODE_CSV_COLUMNS = [
+    "episode_ix",
+    "seed",
+    "sum_reward",
+    "max_reward",
+    "success",
+    "video_path",
+    "max_openness",
+    "door_open_any",
+    "final_engaged",
+    "min_handle_distance",
+    "final_handle_distance",
+]
+
+
+def append_per_episode_csv_row(csv_path: Path, row: dict[str, Any]) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not csv_path.exists()
+    with csv_path.open("a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=PER_EPISODE_CSV_COLUMNS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({key: row.get(key, "") for key in PER_EPISODE_CSV_COLUMNS})
 
 
 def rollout(
@@ -147,6 +173,7 @@ def rollout(
     all_rewards = []
     all_successes = []
     all_dones = []
+    latest_final_info = None
 
     step = 0
     # Keep track of which environments are done.
@@ -199,6 +226,10 @@ def rollout(
                     "Unsupported `final_info` format: expected dict (Gymnasium >= 1.0). "
                     "You're likely using an older version of gymnasium (< 1.0). Please upgrade."
                 )
+            latest_final_info = {
+                key: (value.copy() if isinstance(value, np.ndarray) else value)
+                for key, value in final_info.items()
+            }
             successes = final_info["is_success"].tolist()
         else:
             successes = [False] * env.num_envs
@@ -240,6 +271,9 @@ def rollout(
         for key in all_observations[0]:
             stacked_observations[key] = torch.stack([obs[key] for obs in all_observations], dim=1)
         ret[OBS_STR] = stacked_observations
+
+    if latest_final_info is not None:
+        ret["final_info"] = latest_final_info
 
     if hasattr(policy, "use_original_modules"):
         policy.use_original_modules()
@@ -291,6 +325,7 @@ def eval_policy(
 
     start = time.time()
     policy.eval()
+    per_episode_csv_path = (videos_dir.parent.parent if videos_dir is not None else Path.cwd()) / "per_episode_results.csv"
 
     # Determine how many batched rollouts we need to get n_episodes. Note that if n_episodes is not evenly
     # divisible by env.num_envs we end up discarding some data in the last batch.
@@ -387,11 +422,13 @@ def eval_policy(
                 # Concatenate the episode data.
                 episode_data = {k: torch.cat([episode_data[k], this_episode_data[k]]) for k in episode_data}
 
+        batch_video_paths = [""] * env.num_envs
+
         # Maybe render video for visualization.
         if max_episodes_rendered > 0 and len(ep_frames) > 0:
             batch_stacked_frames = np.stack(ep_frames, axis=1)  # (b, t, *)
-            for stacked_frames, done_index in zip(
-                batch_stacked_frames, done_indices.flatten().tolist(), strict=False
+            for env_ix, (stacked_frames, done_index) in enumerate(
+                zip(batch_stacked_frames, done_indices.flatten().tolist(), strict=False)
             ):
                 if n_episodes_rendered >= max_episodes_rendered:
                     break
@@ -399,6 +436,7 @@ def eval_policy(
                 videos_dir.mkdir(parents=True, exist_ok=True)
                 video_path = videos_dir / f"eval_episode_{n_episodes_rendered}.mp4"
                 video_paths.append(str(video_path))
+                batch_video_paths[env_ix] = str(video_path)
                 thread = threading.Thread(
                     target=write_video,
                     args=(
@@ -410,6 +448,32 @@ def eval_policy(
                 thread.start()
                 threads.append(thread)
                 n_episodes_rendered += 1
+
+        final_info = rollout_data.get("final_info", {})
+        batch_max_openness = final_info.get("max_openness")
+        batch_door_open_any = final_info.get("door_open_any")
+        batch_final_engaged = final_info.get("final_engaged")
+        batch_min_handle_distance = final_info.get("min_handle_distance")
+        batch_final_handle_distance = final_info.get("final_handle_distance")
+
+        batch_episode_start = batch_ix * env.num_envs
+        max_valid_batch_episodes = max(0, min(env.num_envs, n_episodes - batch_episode_start))
+        for env_ix in range(max_valid_batch_episodes):
+            episode_ix = batch_episode_start + env_ix
+            row = {
+                "episode_ix": episode_ix,
+                "seed": (list(seeds)[env_ix] if seeds else None),
+                "sum_reward": batch_sum_rewards[env_ix].item(),
+                "max_reward": batch_max_rewards[env_ix].item(),
+                "success": bool(batch_successes[env_ix].item()),
+                "video_path": batch_video_paths[env_ix],
+                "max_openness": "" if batch_max_openness is None or np.isnan(batch_max_openness[env_ix]) else float(batch_max_openness[env_ix]),
+                "door_open_any": "" if batch_door_open_any is None else bool(batch_door_open_any[env_ix]),
+                "final_engaged": "" if batch_final_engaged is None else bool(batch_final_engaged[env_ix]),
+                "min_handle_distance": "" if batch_min_handle_distance is None or np.isnan(batch_min_handle_distance[env_ix]) else float(batch_min_handle_distance[env_ix]),
+                "final_handle_distance": "" if batch_final_handle_distance is None or np.isnan(batch_final_handle_distance[env_ix]) else float(batch_final_handle_distance[env_ix]),
+            }
+            append_per_episode_csv_row(per_episode_csv_path, row)
 
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}
