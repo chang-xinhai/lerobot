@@ -367,10 +367,34 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
+        dataset_from_indices = dataset.meta.episodes["dataset_from_index"]
+        dataset_to_indices = dataset.meta.episodes["dataset_to_index"]
+        episode_indices_to_use = dataset.episodes
+
+        # When LeRobotDataset is instantiated with `episodes=...`, __getitem__ expects
+        # indices relative to the filtered HF dataset rather than absolute frame indices
+        # from the full metadata table. Build per-episode spans in filtered-dataset space.
+        if dataset.episodes is not None and getattr(dataset, "hf_dataset", None) is not None:
+            selected_episode_indices = dataset.hf_dataset["episode_index"]
+            dataset_from_indices = []
+            dataset_to_indices = []
+            if selected_episode_indices:
+                current_episode = selected_episode_indices[0]
+                current_start = 0
+                for row_idx, episode_index in enumerate(selected_episode_indices[1:], start=1):
+                    if episode_index != current_episode:
+                        dataset_from_indices.append(current_start)
+                        dataset_to_indices.append(row_idx)
+                        current_episode = episode_index
+                        current_start = row_idx
+                dataset_from_indices.append(current_start)
+                dataset_to_indices.append(len(selected_episode_indices))
+            episode_indices_to_use = None
+
         sampler = EpisodeAwareSampler(
-            dataset.meta.episodes["dataset_from_index"],
-            dataset.meta.episodes["dataset_to_index"],
-            episode_indices_to_use=dataset.episodes,
+            dataset_from_indices,
+            dataset_to_indices,
+            episode_indices_to_use=episode_indices_to_use,
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,
         )

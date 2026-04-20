@@ -12,25 +12,78 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .act.configuration_act import ACTConfig as ACTConfig
-from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
 from .factory import get_policy_class, make_policy, make_policy_config, make_pre_post_processors
-from .groot.configuration_groot import GrootConfig as GrootConfig
-from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig as MultiTaskDiTConfig
-from .pi0.configuration_pi0 import PI0Config as PI0Config
-from .pi0_fast.configuration_pi0_fast import PI0FastConfig as PI0FastConfig
-from .pi05.configuration_pi05 import PI05Config as PI05Config
 from .pretrained import PreTrainedPolicy as PreTrainedPolicy
 from .rtc import ActionInterpolator as ActionInterpolator
-from .sac.configuration_sac import SACConfig as SACConfig
-from .sac.reward_model.configuration_classifier import RewardClassifierConfig as RewardClassifierConfig
-from .sarm.configuration_sarm import SARMConfig as SARMConfig
-from .smolvla.configuration_smolvla import SmolVLAConfig as SmolVLAConfig
-from .tdmpc.configuration_tdmpc import TDMPCConfig as TDMPCConfig
 from .utils import make_robot_action, prepare_observation_for_inference
-from .vqbet.configuration_vqbet import VQBeTConfig as VQBeTConfig
-from .wall_x.configuration_wall_x import WallXConfig as WallXConfig
-from .xvla.configuration_xvla import XVLAConfig as XVLAConfig
+
+from .act.configuration_act import ACTConfig as ACTConfig
+from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
+
+try:
+    from .groot.configuration_groot import GrootConfig as GrootConfig
+except ImportError:
+    GrootConfig = None
+
+try:
+    from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig as MultiTaskDiTConfig
+except ImportError:
+    MultiTaskDiTConfig = None
+
+try:
+    from .pi0.configuration_pi0 import PI0Config as PI0Config
+except ImportError:
+    PI0Config = None
+
+try:
+    from .pi0_fast.configuration_pi0_fast import PI0FastConfig as PI0FastConfig
+except ImportError:
+    PI0FastConfig = None
+
+try:
+    from .pi05.configuration_pi05 import PI05Config as PI05Config
+except ImportError:
+    PI05Config = None
+
+try:
+    from .sac.configuration_sac import SACConfig as SACConfig
+except ImportError:
+    SACConfig = None
+
+try:
+    from .sac.reward_model.configuration_classifier import RewardClassifierConfig as RewardClassifierConfig
+except ImportError:
+    RewardClassifierConfig = None
+
+try:
+    from .sarm.configuration_sarm import SARMConfig as SARMConfig
+except ImportError:
+    SARMConfig = None
+
+try:
+    from .smolvla.configuration_smolvla import SmolVLAConfig as SmolVLAConfig
+except ImportError:
+    SmolVLAConfig = None
+
+try:
+    from .tdmpc.configuration_tdmpc import TDMPCConfig as TDMPCConfig
+except ImportError:
+    TDMPCConfig = None
+
+try:
+    from .vqbet.configuration_vqbet import VQBeTConfig as VQBeTConfig
+except ImportError:
+    VQBeTConfig = None
+
+try:
+    from .wall_x.configuration_wall_x import WallXConfig as WallXConfig
+except ImportError:
+    WallXConfig = None
+
+try:
+    from .xvla.configuration_xvla import XVLAConfig as XVLAConfig
+except ImportError:
+    XVLAConfig = None
 
 # NOTE: Policy modeling classes (e.g., SACPolicy) are intentionally NOT re-exported here.
 # They have heavy optional dependencies and are loaded lazily via get_policy_class().
@@ -40,19 +93,6 @@ __all__ = [
     # Configuration classes
     "ACTConfig",
     "DiffusionConfig",
-    "GrootConfig",
-    "MultiTaskDiTConfig",
-    "PI0Config",
-    "PI0FastConfig",
-    "PI05Config",
-    "RewardClassifierConfig",
-    "SACConfig",
-    "SARMConfig",
-    "SmolVLAConfig",
-    "TDMPCConfig",
-    "VQBeTConfig",
-    "WallXConfig",
-    "XVLAConfig",
     # Base class
     "PreTrainedPolicy",
     # RTC utilities
@@ -66,3 +106,21 @@ __all__ = [
     "make_policy_config",
     "make_pre_post_processors",
 ]
+
+for _name in [
+    "GrootConfig",
+    "MultiTaskDiTConfig",
+    "PI0Config",
+    "PI0FastConfig",
+    "PI05Config",
+    "RewardClassifierConfig",
+    "SACConfig",
+    "SARMConfig",
+    "SmolVLAConfig",
+    "TDMPCConfig",
+    "VQBeTConfig",
+    "WallXConfig",
+    "XVLAConfig",
+]:
+    if globals().get(_name) is not None:
+        __all__.append(_name)

@@ -15,9 +15,11 @@
 # limitations under the License.
 import importlib.util
 import os
+import re
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from functools import singledispatch
+from pathlib import Path
 from typing import Any
 
 import einops
@@ -277,6 +279,10 @@ def _parse_hub_url(hub_uri: str):
     return repo_id, revision, file_path
 
 
+def _sanitize_module_name(name: str) -> str:
+    return re.sub(r"[^0-9a-zA-Z_]", "_", name)
+
+
 def _download_hub_file(
     cfg_str: str,
     trust_remote_code: bool,
@@ -293,6 +299,20 @@ def _download_hub_file(
             "If you trust this repo and understand the risks, call `make_env(..., trust_remote_code=True)` "
             "and prefer pinning to a specific revision: 'user/repo@<commit-hash>:env.py'."
         )
+
+    local_path = Path(cfg_str).expanduser()
+    if local_path.is_file():
+        if local_path.suffix != ".py":
+            raise ValueError(f"Local hub_path file must be a Python file, got: {local_path}")
+        resolved_file = local_path.resolve()
+        return str(resolved_file.parent), resolved_file.name, str(resolved_file), None
+
+    if local_path.is_dir():
+        resolved_dir = local_path.resolve()
+        resolved_file = resolved_dir / "env.py"
+        if not resolved_file.exists():
+            raise FileNotFoundError(f"Local hub_path directory missing env.py: {resolved_dir}")
+        return str(resolved_dir), "env.py", str(resolved_file), None
 
     repo_id, revision, file_path = _parse_hub_url(cfg_str)
 
@@ -316,7 +336,7 @@ def _import_hub_module(local_file: str, repo_id: str) -> Any:
     """
     Import the downloaded file as a module and surface helpful import error messages.
     """
-    module_name = f"hub_env_{repo_id.replace('/', '_')}"
+    module_name = f"hub_env_{_sanitize_module_name(repo_id)}"
     try:
         module = _load_module_from_path(local_file, module_name=module_name)
     except ModuleNotFoundError as e:

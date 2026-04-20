@@ -46,20 +46,8 @@ from lerobot.utils.feature_utils import dataset_to_policy_features
 
 from .act.configuration_act import ACTConfig
 from .diffusion.configuration_diffusion import DiffusionConfig
-from .groot.configuration_groot import GrootConfig
-from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig
-from .pi0.configuration_pi0 import PI0Config
-from .pi05.configuration_pi05 import PI05Config
 from .pretrained import PreTrainedPolicy
-from .sac.configuration_sac import SACConfig
-from .sac.reward_model.configuration_classifier import RewardClassifierConfig
-from .sarm.configuration_sarm import SARMConfig
-from .smolvla.configuration_smolvla import SmolVLAConfig
-from .tdmpc.configuration_tdmpc import TDMPCConfig
 from .utils import validate_visual_features_consistency
-from .vqbet.configuration_vqbet import VQBeTConfig
-from .wall_x.configuration_wall_x import WallXConfig
-from .xvla.configuration_xvla import XVLAConfig
 
 
 def _reconnect_relative_absolute_steps(
@@ -97,6 +85,7 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
         NotImplementedError: If the policy name is not recognized.
     """
     if name == "tdmpc":
+        from .tdmpc.configuration_tdmpc import TDMPCConfig
         from .tdmpc.modeling_tdmpc import TDMPCPolicy
 
         return TDMPCPolicy
@@ -109,14 +98,17 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
 
         return ACTPolicy
     elif name == "multi_task_dit":
+        from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig
         from .multi_task_dit.modeling_multi_task_dit import MultiTaskDiTPolicy
 
         return MultiTaskDiTPolicy
     elif name == "vqbet":
+        from .vqbet.configuration_vqbet import VQBeTConfig
         from .vqbet.modeling_vqbet import VQBeTPolicy
 
         return VQBeTPolicy
     elif name == "pi0":
+        from .pi0.configuration_pi0 import PI0Config
         from .pi0.modeling_pi0 import PI0Policy
 
         return PI0Policy
@@ -125,34 +117,42 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
 
         return PI0FastPolicy
     elif name == "pi05":
+        from .pi05.configuration_pi05 import PI05Config
         from .pi05.modeling_pi05 import PI05Policy
 
         return PI05Policy
     elif name == "sac":
+        from .sac.configuration_sac import SACConfig
         from .sac.modeling_sac import SACPolicy
 
         return SACPolicy
     elif name == "reward_classifier":
+        from .sac.reward_model.configuration_classifier import RewardClassifierConfig
         from .sac.reward_model.modeling_classifier import Classifier
 
         return Classifier
     elif name == "smolvla":
+        from .smolvla.configuration_smolvla import SmolVLAConfig
         from .smolvla.modeling_smolvla import SmolVLAPolicy
 
         return SmolVLAPolicy
     elif name == "sarm":
+        from .sarm.configuration_sarm import SARMConfig
         from .sarm.modeling_sarm import SARMRewardModel
 
         return SARMRewardModel
     elif name == "groot":
+        from .groot.configuration_groot import GrootConfig
         from .groot.modeling_groot import GrootPolicy
 
         return GrootPolicy
     elif name == "xvla":
+        from .xvla.configuration_xvla import XVLAConfig
         from .xvla.modeling_xvla import XVLAPolicy
 
         return XVLAPolicy
     elif name == "wall_x":
+        from .wall_x.configuration_wall_x import WallXConfig
         from .wall_x.modeling_wall_x import WallXPolicy
 
         return WallXPolicy
@@ -183,30 +183,52 @@ def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
         ValueError: If the `policy_type` is not recognized.
     """
     if policy_type == "tdmpc":
+        from .tdmpc.configuration_tdmpc import TDMPCConfig
+
         return TDMPCConfig(**kwargs)
     elif policy_type == "diffusion":
         return DiffusionConfig(**kwargs)
     elif policy_type == "act":
         return ACTConfig(**kwargs)
     elif policy_type == "multi_task_dit":
+        from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig
+
         return MultiTaskDiTConfig(**kwargs)
     elif policy_type == "vqbet":
+        from .vqbet.configuration_vqbet import VQBeTConfig
+
         return VQBeTConfig(**kwargs)
     elif policy_type == "pi0":
+        from .pi0.configuration_pi0 import PI0Config
+
         return PI0Config(**kwargs)
     elif policy_type == "pi05":
+        from .pi05.configuration_pi05 import PI05Config
+
         return PI05Config(**kwargs)
     elif policy_type == "sac":
+        from .sac.configuration_sac import SACConfig
+
         return SACConfig(**kwargs)
     elif policy_type == "smolvla":
+        from .smolvla.configuration_smolvla import SmolVLAConfig
+
         return SmolVLAConfig(**kwargs)
     elif policy_type == "reward_classifier":
+        from .sac.reward_model.configuration_classifier import RewardClassifierConfig
+
         return RewardClassifierConfig(**kwargs)
     elif policy_type == "groot":
+        from .groot.configuration_groot import GrootConfig
+
         return GrootConfig(**kwargs)
     elif policy_type == "xvla":
+        from .xvla.configuration_xvla import XVLAConfig
+
         return XVLAConfig(**kwargs)
     elif policy_type == "wall_x":
+        from .wall_x.configuration_wall_x import WallXConfig
+
         return WallXConfig(**kwargs)
     else:
         try:
@@ -270,7 +292,7 @@ def make_pre_post_processors(
     """
     if pretrained_path:
         # TODO(Steven): Temporary patch, implement correctly the processors for Gr00t
-        if isinstance(policy_cfg, GrootConfig):
+        if policy_cfg.type == "groot":
             # GROOT handles normalization in groot_pack_inputs_v3 step
             # Need to override both stats AND normalize_min_max since saved config might be empty
             preprocessor_overrides = {}
@@ -312,7 +334,7 @@ def make_pre_post_processors(
         return preprocessor, postprocessor
 
     # Create a new processor based on policy type
-    if isinstance(policy_cfg, TDMPCConfig):
+    if policy_cfg.type == "tdmpc":
         from .tdmpc.processor_tdmpc import make_tdmpc_pre_post_processors
 
         processors = make_tdmpc_pre_post_processors(
@@ -320,7 +342,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, DiffusionConfig):
+    elif policy_cfg.type == "diffusion":
         from .diffusion.processor_diffusion import make_diffusion_pre_post_processors
 
         processors = make_diffusion_pre_post_processors(
@@ -328,7 +350,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, ACTConfig):
+    elif policy_cfg.type == "act":
         from .act.processor_act import make_act_pre_post_processors
 
         processors = make_act_pre_post_processors(
@@ -336,7 +358,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, MultiTaskDiTConfig):
+    elif policy_cfg.type == "multi_task_dit":
         from .multi_task_dit.processor_multi_task_dit import (
             make_multi_task_dit_pre_post_processors,
         )
@@ -346,7 +368,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, VQBeTConfig):
+    elif policy_cfg.type == "vqbet":
         from .vqbet.processor_vqbet import make_vqbet_pre_post_processors
 
         processors = make_vqbet_pre_post_processors(
@@ -354,7 +376,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, PI0Config):
+    elif policy_cfg.type == "pi0":
         from .pi0.processor_pi0 import make_pi0_pre_post_processors
 
         processors = make_pi0_pre_post_processors(
@@ -362,7 +384,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, PI05Config):
+    elif policy_cfg.type == "pi05":
         from .pi05.processor_pi05 import make_pi05_pre_post_processors
 
         processors = make_pi05_pre_post_processors(
@@ -370,7 +392,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, SACConfig):
+    elif policy_cfg.type == "sac":
         from .sac.processor_sac import make_sac_pre_post_processors
 
         processors = make_sac_pre_post_processors(
@@ -378,7 +400,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, RewardClassifierConfig):
+    elif policy_cfg.type == "reward_classifier":
         from .sac.reward_model.processor_classifier import make_classifier_processor
 
         processors = make_classifier_processor(
@@ -386,7 +408,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, SmolVLAConfig):
+    elif policy_cfg.type == "smolvla":
         from .smolvla.processor_smolvla import make_smolvla_pre_post_processors
 
         processors = make_smolvla_pre_post_processors(
@@ -394,7 +416,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, SARMConfig):
+    elif policy_cfg.type == "sarm":
         from .sarm.processor_sarm import make_sarm_pre_post_processors
 
         processors = make_sarm_pre_post_processors(
@@ -402,7 +424,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
             dataset_meta=kwargs.get("dataset_meta"),
         )
-    elif isinstance(policy_cfg, GrootConfig):
+    elif policy_cfg.type == "groot":
         from .groot.processor_groot import make_groot_pre_post_processors
 
         processors = make_groot_pre_post_processors(
@@ -410,7 +432,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, XVLAConfig):
+    elif policy_cfg.type == "xvla":
         from .xvla.processor_xvla import (
             make_xvla_pre_post_processors,
         )
@@ -420,7 +442,7 @@ def make_pre_post_processors(
             dataset_stats=kwargs.get("dataset_stats"),
         )
 
-    elif isinstance(policy_cfg, WallXConfig):
+    elif policy_cfg.type == "wall_x":
         from .wall_x.processor_wall_x import make_wall_x_pre_post_processors
 
         processors = make_wall_x_pre_post_processors(

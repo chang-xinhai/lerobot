@@ -15,12 +15,14 @@
 # limitations under the License.
 import json
 import logging
+from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
 JsonLike = str | int | float | bool | None | list["JsonLike"] | dict[str, "JsonLike"] | tuple["JsonLike", ...]
+TJsonLike = TypeVar("TJsonLike", bound=JsonLike)
 
 
 def load_json(fpath: Path) -> Any:
@@ -63,6 +65,12 @@ def write_video(video_path: str | Path, stacked_frames: list, fps: int) -> None:
     require_package("av", extra="av-dep")
     import av
 
+    if fps <= 0:
+        raise ValueError(f"FPS must be positive, got {fps}")
+
+    # PyAV expects an int/Fraction-like rate. Some envs expose render_fps as float.
+    av_rate = Fraction(str(fps)).limit_denominator()
+
     with av.open(str(video_path), mode="w") as container:
         orig_height, orig_width = stacked_frames[0].shape[:2]
         # yuv420p requires even dimensions; crop by one pixel if needed
@@ -76,7 +84,7 @@ def write_video(video_path: str | Path, stacked_frames: list, fps: int) -> None:
                 width,
                 height,
             )
-        stream = container.add_stream("libx264", rate=fps)
+        stream = container.add_stream("libx264", rate=av_rate)
         stream.width = width
         stream.height = height
         stream.pix_fmt = "yuv420p"
@@ -90,7 +98,7 @@ def write_video(video_path: str | Path, stacked_frames: list, fps: int) -> None:
             container.mux(packet)
 
 
-def deserialize_json_into_object[T: JsonLike](fpath: Path, obj: T) -> T:
+def deserialize_json_into_object(fpath: Path, obj: TJsonLike) -> TJsonLike:
     """
     Loads the JSON data from `fpath` and recursively fills `obj` with the
     corresponding values (strictly matching structure and types).

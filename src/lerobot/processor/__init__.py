@@ -93,7 +93,13 @@ from .relative_action_processor import (
     to_relative_actions,
 )
 from .rename_processor import RenameObservationsProcessorStep, rename_stats
-from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
+try:
+    from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
+except ImportError:
+    # Keep tokenizer-dependent processors optional so non-language policies
+    # can import the processor package without pulling in transformers.
+    ActionTokenizerProcessorStep = None
+    TokenizerProcessorStep = None
 
 __all__ = [
     "ActionProcessorStep",
@@ -153,8 +159,6 @@ __all__ = [
     "TimeLimitProcessorStep",
     "AddBatchDimensionProcessorStep",
     "RobotProcessorPipeline",
-    "TokenizerProcessorStep",
-    "ActionTokenizerProcessorStep",
     "Torch2NumpyActionProcessorStep",
     "RobotActionToPolicyActionProcessorStep",
     "PolicyActionToRobotActionProcessorStep",
@@ -166,3 +170,11 @@ __all__ = [
     "UnnormalizerProcessorStep",
     "VanillaObservationProcessorStep",
 ]
+
+if TokenizerProcessorStep is not None:
+    __all__.extend(
+        [
+            "TokenizerProcessorStep",
+            "ActionTokenizerProcessorStep",
+        ]
+    )
