@@ -659,13 +659,12 @@ def eval_main(cfg: EvalPipelineConfig):
         for task_group, task_group_info in info.items():
             print(f"\nAggregated Metrics for {task_group}:")
             print(task_group_info)
-    # Close all vec envs
-    close_envs(envs)
-
-    # Save info
+    # Save info before env teardown so artifacts survive simulator shutdown issues.
     with open(Path(cfg.output_dir) / "eval_info.json", "w") as f:
         json.dump(info, f, indent=2)
 
+    # Close all vec envs
+    close_envs(envs)
     logging.info("End of eval")
 
 
