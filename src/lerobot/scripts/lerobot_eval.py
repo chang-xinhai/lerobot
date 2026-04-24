@@ -99,15 +99,13 @@ from lerobot.utils.utils import (
 PER_EPISODE_CSV_COLUMNS = [
     "episode_ix",
     "seed",
-    "sum_reward",
-    "max_reward",
     "success",
-    "video_path",
-    "max_openness",
-    "door_open_any",
+    "final_door_open",
+    "final_door_openness",
     "final_engaged",
-    "min_handle_distance",
     "final_handle_distance",
+    "steps",
+    "video_path",
 ]
 
 
@@ -345,10 +343,9 @@ def eval_policy(
     n_batches = n_episodes // env.num_envs + int((n_episodes % env.num_envs) != 0)
 
     # Keep track of some metrics.
-    sum_rewards = []
-    max_rewards = []
     all_successes = []
     all_seeds = []
+    per_episode_rows = []
     threads = []  # for video saving threads
     n_episodes_rendered = 0  # for saving the correct number of videos
 
@@ -407,10 +404,6 @@ def eval_policy(
         # (batch-element-wise). Note the `done_indices + 1` to make sure to keep the data from the done step.
         mask = (torch.arange(n_steps) <= einops.repeat(done_indices + 1, "b -> b s", s=n_steps)).int()
         # Extend metrics.
-        batch_sum_rewards = einops.reduce((rollout_data["reward"] * mask), "b n -> b", "sum")
-        sum_rewards.extend(batch_sum_rewards.tolist())
-        batch_max_rewards = einops.reduce((rollout_data["reward"] * mask), "b n -> b", "max")
-        max_rewards.extend(batch_max_rewards.tolist())
         batch_successes = einops.reduce((rollout_data["success"] * mask), "b n -> b", "any")
         all_successes.extend(batch_successes.tolist())
         if seeds:
@@ -464,10 +457,9 @@ def eval_policy(
                 n_episodes_rendered += 1
 
         final_info = rollout_data.get("final_info", {})
-        batch_max_openness = final_info.get("max_openness")
-        batch_door_open_any = final_info.get("door_open_any")
+        batch_final_door_open = final_info.get("final_door_open")
+        batch_final_door_openness = final_info.get("final_door_openness")
         batch_final_engaged = final_info.get("final_engaged")
-        batch_min_handle_distance = final_info.get("min_handle_distance")
         batch_final_handle_distance = final_info.get("final_handle_distance")
 
         batch_episode_start = batch_ix * env.num_envs
@@ -484,21 +476,27 @@ def eval_policy(
                     return ""
                 return value
 
-            append_per_episode_csv_row(
-                per_episode_csv_path,
+            episode_steps = int(done_indices[env_ix].item()) + 1
+            row = {
+                "episode_ix": batch_episode_start + env_ix,
+                "seed": seeds_list[env_ix] if seeds_list else None,
+                "success": bool(batch_successes[env_ix].item()),
+                "final_door_open": _maybe_scalar(batch_final_door_open),
+                "final_door_openness": _maybe_scalar(batch_final_door_openness),
+                "final_engaged": _maybe_scalar(batch_final_engaged),
+                "final_handle_distance": _maybe_scalar(batch_final_handle_distance),
+                "steps": f"{episode_steps}/{n_steps}",
+                "video_path": batch_video_paths[env_ix] or None,
+            }
+            append_per_episode_csv_row(per_episode_csv_path, row)
+            per_episode_rows.append(
                 {
-                    "episode_ix": batch_episode_start + env_ix,
-                    "seed": seeds_list[env_ix] if seeds_list else None,
-                    "sum_reward": batch_sum_rewards[env_ix].item(),
-                    "max_reward": batch_max_rewards[env_ix].item(),
-                    "success": bool(batch_successes[env_ix].item()),
-                    "video_path": batch_video_paths[env_ix],
-                    "max_openness": _maybe_scalar(batch_max_openness),
-                    "door_open_any": _maybe_scalar(batch_door_open_any),
-                    "final_engaged": _maybe_scalar(batch_final_engaged),
-                    "min_handle_distance": _maybe_scalar(batch_min_handle_distance),
-                    "final_handle_distance": _maybe_scalar(batch_final_handle_distance),
-                },
+                    "episode_ix": row["episode_ix"],
+                    "final_door_openness": row["final_door_openness"],
+                    "final_handle_distance": row["final_handle_distance"],
+                    "success": row["success"],
+                    "seed": row["seed"],
+                }
             )
 
         progbar.set_postfix(
@@ -511,27 +509,8 @@ def eval_policy(
 
     # Compile eval info.
     info = {
-        "per_episode": [
-            {
-                "episode_ix": i,
-                "sum_reward": sum_reward,
-                "max_reward": max_reward,
-                "success": success,
-                "seed": seed,
-            }
-            for i, (sum_reward, max_reward, success, seed) in enumerate(
-                zip(
-                    sum_rewards[:n_episodes],
-                    max_rewards[:n_episodes],
-                    all_successes[:n_episodes],
-                    all_seeds[:n_episodes],
-                    strict=True,
-                )
-            )
-        ],
+        "per_episode": per_episode_rows[:n_episodes],
         "aggregated": {
-            "avg_sum_reward": float(np.nanmean(sum_rewards[:n_episodes])),
-            "avg_max_reward": float(np.nanmean(max_rewards[:n_episodes])),
             "pc_success": float(np.nanmean(all_successes[:n_episodes]) * 100),
             "eval_s": time.time() - start,
             "eval_ep_s": (time.time() - start) / n_episodes,
