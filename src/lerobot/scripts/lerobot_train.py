@@ -263,14 +263,11 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
     accelerator.wait_for_everyone()
 
     processor_pretrained_path = cfg.policy.pretrained_path
-    if (
-        getattr(cfg.policy, "use_relative_actions", False)
-        and processor_pretrained_path is not None
-        and not cfg.resume
-    ):
+    if cfg.policy.type == "pi0_fast" and processor_pretrained_path is not None and not cfg.resume:
         logging.warning(
-            "use_relative_actions=true with pretrained processors can skip relative transforms if "
-            "the checkpoint processors do not define them. Building processors from current policy config."
+            "pi0_fast training with a pretrained policy builds processors from the current policy config "
+            "instead of the pretrained checkpoint processors. This avoids stale processor registry names "
+            "and keeps current action preprocessing settings in effect."
         )
         processor_pretrained_path = None
 
