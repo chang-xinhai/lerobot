@@ -260,15 +260,21 @@ class PI0FastPaliGemma(nn.Module):
         if image.dtype != torch.float32:
             image = image.to(torch.float32)
         image_outputs = self.paligemma.model.get_image_features(image)
+        # Transformers 4.x returns already scaled image features; 5.x exposes the
+        # pre-scaled features via pooler_output, matching LeRobot's original path.
         if isinstance(image_outputs, torch.Tensor):
             features = image_outputs
+            needs_rescale = False
         elif hasattr(image_outputs, "pooler_output"):
             features = image_outputs.pooler_output
+            needs_rescale = True
         elif isinstance(image_outputs, (tuple, list)) and image_outputs:
             features = image_outputs[0]
+            needs_rescale = False
         else:
             raise TypeError(f"Unsupported image feature output type: {type(image_outputs)!r}")
-        features = features * self.paligemma.config.text_config.hidden_size**0.5
+        if needs_rescale:
+            features = features * self.paligemma.config.text_config.hidden_size**0.5
         if features.dtype != out_dtype:
             features = features.to(out_dtype)
         return features
