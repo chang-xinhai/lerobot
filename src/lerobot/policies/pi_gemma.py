@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 import torch
@@ -49,6 +50,32 @@ else:
     GradientCheckpointingLayer = None
     BaseModelOutputWithPast = None
     create_causal_mask = None
+
+_CREATE_CAUSAL_MASK_EMBEDS_ARG = (
+    "inputs_embeds"
+    if create_causal_mask is not None and "inputs_embeds" in inspect.signature(create_causal_mask).parameters
+    else "input_embeds"
+)
+
+
+def _create_causal_mask_compat(
+    *,
+    config,
+    inputs_embeds: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    cache_position: torch.Tensor,
+    past_key_values,
+    position_ids: torch.Tensor | None,
+):
+    kwargs = {
+        "config": config,
+        _CREATE_CAUSAL_MASK_EMBEDS_ARG: inputs_embeds,
+        "attention_mask": attention_mask,
+        "cache_position": cache_position,
+        "past_key_values": past_key_values,
+        "position_ids": position_ids,
+    }
+    return create_causal_mask(**kwargs)
 
 
 def _gated_residual(
@@ -258,7 +285,7 @@ class PiGemmaModel(GemmaModel):  # type: ignore[misc]
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        causal_mask = create_causal_mask(
+        causal_mask = _create_causal_mask_compat(
             config=self.config,
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,

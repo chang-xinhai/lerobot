@@ -260,7 +260,15 @@ class PI0FastPaliGemma(nn.Module):
         if image.dtype != torch.float32:
             image = image.to(torch.float32)
         image_outputs = self.paligemma.model.get_image_features(image)
-        features = image_outputs.pooler_output * self.paligemma.config.text_config.hidden_size**0.5
+        if isinstance(image_outputs, torch.Tensor):
+            features = image_outputs
+        elif hasattr(image_outputs, "pooler_output"):
+            features = image_outputs.pooler_output
+        elif isinstance(image_outputs, (tuple, list)) and image_outputs:
+            features = image_outputs[0]
+        else:
+            raise TypeError(f"Unsupported image feature output type: {type(image_outputs)!r}")
+        features = features * self.paligemma.config.text_config.hidden_size**0.5
         if features.dtype != out_dtype:
             features = features.to(out_dtype)
         return features
@@ -1201,53 +1209,50 @@ class PI0FastPolicy(PreTrainedPolicy):
         if single_sample:
             tokens = tokens.unsqueeze(0)
 
-        # Convert token IDs to token strings
-        decoded_tokens = [self._paligemma_tokenizer.convert_ids_to_tokens(seq.tolist()) for seq in tokens]
-        # Get the token sequence for "Action: " to remove it
-        action_prefix_ids = self._paligemma_tokenizer.encode("Action: ", add_special_tokens=False)
-        action_prefix_tokens = self._paligemma_tokenizer.convert_ids_to_tokens(action_prefix_ids)
-        action_prefix_len = len(action_prefix_tokens)
+        token_id_sequences = [seq.tolist() for seq in tokens]
 
-        # Clean tokens by removing everything after the first "|" (end-of-action marker)
-        # and removing all occurrences of "Action: " token sequence
-        # assert that beginning contain "Action: "
-        if self.config.validate_action_token_prefix:
-            for token_seq in decoded_tokens:
-                assert len(token_seq) >= 2 and token_seq[0] == "Action" and token_seq[1] == ":", (
-                    f"Token sequence does not start with ['Action', ':']: {token_seq}"
+        # Get the token sequence for "Action: " to remove it.
+        action_prefix_ids = self._paligemma_tokenizer.encode("Action: ", add_special_tokens=False)
+        action_prefix_len = len(action_prefix_ids)
+        end_token_ids = set(self._paligemma_tokenizer.encode("|", add_special_tokens=False))
+        action_vocab_size = getattr(self.action_tokenizer, "vocab_size", None)
+
+        action_tokens = []
+        for token_seq in token_id_sequences:
+            decoded_for_warning = None
+            if self.config.validate_action_token_prefix and token_seq[:2] != action_prefix_ids[:2]:
+                decoded_for_warning = self._paligemma_tokenizer.convert_ids_to_tokens(token_seq)
+                logging.warning(
+                    "FAST action tokens missing Action: prefix; filtering generated tokens: %s",
+                    decoded_for_warning,
                 )
 
-        cleaned_tokens = []
-        for token_seq in decoded_tokens:
-            # Remove everything after "|"
-            if "|" in token_seq:
-                token_seq = token_seq[: token_seq.index("|")]
+            # Remove everything after the first end-of-action marker.
+            end_positions = [i for i, token_id in enumerate(token_seq) if token_id in end_token_ids]
+            if end_positions:
+                token_seq = token_seq[: end_positions[0]]
 
-            # Remove all occurrences of "Action: " token sequence
+            # Remove all occurrences of the "Action: " token sequence.
             i = 0
-            while i <= len(token_seq) - action_prefix_len:
-                if token_seq[i : i + action_prefix_len] == action_prefix_tokens:
-                    # Found a match, remove it
+            while action_prefix_len and i <= len(token_seq) - action_prefix_len:
+                if token_seq[i : i + action_prefix_len] == action_prefix_ids:
                     token_seq = token_seq[:i] + token_seq[i + action_prefix_len :]
                 else:
                     i += 1
 
-            cleaned_tokens.append(token_seq)
+            raw_action_tokens = torch.tensor(token_seq, dtype=torch.long, device=tokens.device)
+            converted_action_tokens = self._paligemma_tokens_to_act_tokens(raw_action_tokens)
+            if action_vocab_size is not None:
+                converted_action_tokens = converted_action_tokens[
+                    (converted_action_tokens >= 0) & (converted_action_tokens < action_vocab_size)
+                ]
 
-        # Convert token strings back to IDs
-        raw_action_tokens = [
-            torch.tensor(
-                self._paligemma_tokenizer.convert_tokens_to_ids(token_seq),
-                dtype=torch.long,
-                device=tokens.device,
-            )
-            for token_seq in cleaned_tokens
-        ]
+            if converted_action_tokens.numel() == 0:
+                if decoded_for_warning is None:
+                    decoded_for_warning = self._paligemma_tokenizer.convert_ids_to_tokens(token_seq)
+                raise ValueError(f"No FAST action tokens found in generated sequence: {decoded_for_warning}")
 
-        # Convert PaliGemma tokens to action tokens
-        action_tokens = [
-            self._paligemma_tokens_to_act_tokens(raw_action_token) for raw_action_token in raw_action_tokens
-        ]
+            action_tokens.append(converted_action_tokens)
 
         # Decode action tokens to continuous actions
         actions = self.decode_actions_with_fast(
